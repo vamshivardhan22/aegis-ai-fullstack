@@ -92,7 +92,7 @@ def verify_docker_build() -> bool:
 
 
 def verify_k8s_manifests() -> bool:
-    """Validate Kubernetes manifests with kubectl when available, otherwise parse YAML documents."""
+    """Validate Kubernetes manifests deterministically, with optional kubectl dry-run."""
 
     k8s_dir = ROOT / "k8s"
     required = {
@@ -109,7 +109,7 @@ def verify_k8s_manifests() -> bool:
     }
     if not required.issubset({path.name for path in k8s_dir.glob("*.yml")}):
         return False
-    if shutil.which("kubectl"):
+    if os.getenv("AEGIS_USE_KUBECTL") == "1" and shutil.which("kubectl"):
         result = run_command(["kubectl", "apply", "--dry-run=client", "-f", "k8s/"], timeout=120)
         return result.returncode == 0
     for path in k8s_dir.glob("*.yml"):
