@@ -1,0 +1,24 @@
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap");
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root { color: #f1f5f9; background: #0b0f19; font-synthesis: none; text-rendering: optimizeLegibility; -webkit-font-smoothing: antialiased; }
+* { box-sizing: border-box; }
+body { margin: 0; min-width: 320px; min-height: 100vh; background: #0b0f19; font-family: Inter, ui-sans-serif, system-ui, sans-serif; }
+body::before { content: ""; position: fixed; inset: -20%; z-index: -2; background: radial-gradient(circle at 18% 12%, rgba(59,130,246,.25), transparent 30%), radial-gradient(circle at 82% 8%, rgba(168,85,247,.2), transparent 28%), radial-gradient(circle at 72% 78%, rgba(34,197,94,.13), transparent 30%), radial-gradient(circle at 20% 88%, rgba(245,158,11,.11), transparent 26%); animation: mesh 16s ease-in-out infinite; }
+body::after { content: ""; position: fixed; inset: 0; z-index: -1; background: linear-gradient(180deg, rgba(11,15,25,.45), #0b0f19 70%); }
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: #0b0f19; }
+::-webkit-scrollbar-thumb { background: #2d3a4f; border-radius: 999px; }
+::selection { background: rgba(59,130,246,.4); }
+
+@layer components {
+  .panel { @apply rounded-card border border-aegis-border bg-aegis-card/90 shadow-2xl shadow-black/20 backdrop-blur; }
+  .field { @apply w-full rounded-button border border-aegis-border bg-aegis-bg/70 px-4 py-3 text-sm text-aegis-text outline-none transition placeholder:text-aegis-muted focus:border-aegis-blue focus:ring-2 focus:ring-aegis-blue/25; }
+  .gradient-button { @apply inline-flex items-center justify-center gap-2 rounded-button bg-gradient-to-r from-aegis-blue to-aegis-purple px-4 py-2.5 text-sm font-semibold text-white shadow-glow transition hover:scale-[1.01] disabled:cursor-not-allowed disabled:opacity-60; }
+  .ghost-button { @apply inline-flex items-center justify-center gap-2 rounded-button border border-aegis-border bg-aegis-card/70 px-4 py-2.5 text-sm font-semibold text-aegis-text transition hover:border-aegis-blue hover:text-white disabled:cursor-not-allowed disabled:opacity-60; }
+  .skeleton { @apply animate-pulse rounded-card bg-aegis-border/50; }
+}
+
+@keyframes mesh { 0%, 100% { transform: translate3d(0,0,0) scale(1); } 50% { transform: translate3d(2%,-2%,0) scale(1.04); } }

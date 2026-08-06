@@ -1,0 +1,175 @@
+services:
+  aegis-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: aegis-api
+    ports:
+      - "8000:8000"
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.aegis.rule=Host(`localhost`)"
+      - "traefik.http.services.aegis.loadbalancer.server.port=8000"
+    env_file:
+      - .env
+    environment:
+      AEGIS_DB_URL: postgresql+asyncpg://aegis:aegis_secret@postgres:5432/aegis
+      AEGIS_REDIS_URL: redis://redis:6379/0
+      AEGIS_STORAGE_BACKEND: minio
+      AEGIS_MINIO_ENDPOINT: minio:9000
+      AEGIS_MLFLOW_TRACKING_URI: http://mlflow:5000
+      AEGIS_OLLAMA_URL: http://ollama:11434
+      AEGIS_QDRANT_URL: http://qdrant:6333
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      minio:
+        condition: service_healthy
+      mlflow:
+        condition: service_started
+      qdrant:
+        condition: service_started
+    networks:
+      - aegis-network
+
+  postgres:
+    image: postgres:15-alpine
+    container_name: aegis-postgres
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: aegis
+      POSTGRES_PASSWORD: aegis_secret
+      POSTGRES_DB: aegis
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aegis -d aegis"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - aegis-network
+
+  redis:
+    image: redis:7-alpine
+    container_name: aegis-redis
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    networks:
+      - aegis-network
+
+  minio:
+    image: minio/minio:latest
+    container_name: aegis-minio
+    command: server /data --console-address ":9001"
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - aegis-network
+
+  mlflow:
+    image: python:3.11-slim
+    container_name: aegis-mlflow
+    command: >
+      sh -c "pip install --no-cache-dir mlflow psycopg2-binary boto3 &&
+      mlflow server --host 0.0.0.0 --port 5000
+      --backend-store-uri postgresql://aegis:aegis_secret@postgres:5432/aegis
+      --default-artifact-root s3://aegis-mlflow/"
+    ports:
+      - "5000:5000"
+    environment:
+      MLFLOW_S3_ENDPOINT_URL: http://minio:9000
+      AWS_ACCESS_KEY_ID: minioadmin
+      AWS_SECRET_ACCESS_KEY: minioadmin
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    networks:
+      - aegis-network
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: aegis-ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama-data:/root/.ollama
+    networks:
+      - aegis-network
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: aegis-qdrant
+    ports:
+      - "6333:6333"
+    volumes:
+      - qdrant-data:/qdrant/storage
+    networks:
+      - aegis-network
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: aegis-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    networks:
+      - aegis-network
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: aegis-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: admin
+    volumes:
+      - grafana-data:/var/lib/grafana
+    networks:
+      - aegis-network
+
+  traefik:
+    image: traefik:v3.0
+    container_name: aegis-traefik
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./docker/traefik.yml:/etc/traefik/traefik.yml
+    networks:
+      - aegis-network
+
+volumes:
+  postgres-data:
+  redis-data:
+  minio-data:
+  ollama-data:
+  qdrant-data:
+  prometheus-data:
+  grafana-data:
+
+networks:
+  aegis-network:
+    driver: bridge

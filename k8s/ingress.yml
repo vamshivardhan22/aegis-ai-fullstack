@@ -1,0 +1,21 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: aegis-api
+  namespace: aegis-ai
+spec:
+  tls:
+    - hosts:
+        - aegis.example.com
+      secretName: aegis-tls
+  rules:
+    - host: aegis.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: aegis-api
+                port:
+                  number: 8000
