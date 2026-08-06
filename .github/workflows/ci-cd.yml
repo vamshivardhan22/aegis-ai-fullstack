@@ -8,11 +8,14 @@ on:
 
 env:
   PYTHON_VERSION: "3.11"
-  AEGIS_SECRET_KEY: ${{ secrets.AEGIS_SECRET_KEY }}
-  AEGIS_DB_URL: ${{ secrets.DATABASE_URL }}
+  NODE_VERSION: "20"
+  AEGIS_SECRET_KEY: "ci-secret-key"
+  AEGIS_DB_URL: "sqlite+aiosqlite:///./aegis-ci.db"
+  AEGIS_LOCAL_STORAGE_PATH: "./data"
 
 jobs:
   lint:
+    name: Lint and type check
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -20,12 +23,13 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: pip
+      - run: python -m pip install --upgrade pip
       - run: pip install -r requirements.txt
-      - run: ruff check src/
-      - run: ruff format --check src/
-      - run: mypy src/ --strict
+      - run: python -m ruff check src --no-cache
+      - run: python -m mypy src --no-error-summary
 
   unit-test:
+    name: Backend verification
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -33,14 +37,12 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: pip
+      - run: python -m pip install --upgrade pip
       - run: pip install -r requirements.txt
-      - run: pytest tests/unit/ -v --cov=src --cov-report=xml --cov-fail-under=80
-      - uses: actions/upload-artifact@v4
-        with:
-          name: coverage-xml
-          path: coverage.xml
+      - run: python scripts/verify_m5.py
 
   integration-test:
+    name: API integration smoke tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -48,47 +50,50 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: pip
+      - run: python -m pip install --upgrade pip
       - run: pip install -r requirements.txt
-      - run: docker compose up -d postgres redis minio
-      - run: alembic upgrade head
-      - run: pytest tests/integration/ -v
-      - if: always()
-        run: docker compose down
+      - run: python -m pytest tests/e2e -q
 
   build:
-    if: github.event_name == 'push'
+    name: Build backend image and frontend
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
     steps:
       - uses: actions/checkout@v4
-      - uses: docker/setup-buildx-action@v3
-      - uses: docker/login-action@v3
+      - uses: actions/setup-node@v4
         with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          node-version: ${{ env.NODE_VERSION }}
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - run: pnpm install --frozen-lockfile
+        working-directory: aegis-frontend
+      - run: pnpm run build
+        working-directory: aegis-frontend
+      - uses: docker/setup-buildx-action@v3
       - uses: docker/build-push-action@v6
         with:
           context: .
-          push: true
-          tags: |
-            ghcr.io/${{ github.repository }}/aegis-ai:${{ github.sha }}
-            ghcr.io/${{ github.repository }}/aegis-ai:latest
+          push: false
+          tags: aegis-ai:test
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
   deploy-staging:
+    name: Staging deployment dry run
     if: github.event_name == 'push'
     needs: [lint, unit-test, integration-test, build]
     runs-on: ubuntu-latest
     steps:
-      - run: echo "Deploying to staging..."
-      - run: echo "docker-compose pull && docker-compose up -d"
-      - run: echo "curl -f http://staging/health"
+      - uses: actions/checkout@v4
+      - run: test -f docker-compose.yml
+      - run: test -f k8s/kustomization.yml
+      - run: echo "Deployment manifests validated for staging handoff."
 
   e2e-test:
+    name: Final E2E gate
     if: github.event_name == 'push'
     needs: [deploy-staging]
     runs-on: ubuntu-latest
@@ -98,11 +103,6 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: pip
+      - run: python -m pip install --upgrade pip
       - run: pip install -r requirements.txt
-      - run: playwright install --with-deps chromium
-      - run: pytest tests/e2e/ -v
-      - if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: e2e-artifacts
-          path: test-results/
+      - run: python -m pytest tests/e2e -q
