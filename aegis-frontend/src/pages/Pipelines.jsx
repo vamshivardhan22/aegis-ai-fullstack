@@ -1,5 +1,5 @@
-import { ChevronDown, RotateCcw } from "lucide-react";
-import { useState } from "react";
+import { RotateCcw } from "lucide-react";
+import { Fragment, useState } from "react";
 import PipelineTimeline from "../components/PipelineTimeline.jsx";
 import { usePipelines } from "../hooks/usePipelines.js";
 import { cn } from "../lib/utils.js";
@@ -22,9 +22,9 @@ export default function Pipelines() {
               <thead className="bg-aegis-bg/70 text-aegis-muted"><tr>{["ID", "Name", "Dataset", "Status", "Progress", "Started", "Actions"].map((h) => <th key={h} className="px-5 py-4 font-semibold">{h}</th>)}</tr></thead>
               <tbody>
                 {filtered.map((pipeline) => (
-                  <>
+                  <Fragment key={pipeline.id}>
                     <tr key={pipeline.id} onClick={() => setOpen(open === pipeline.id ? null : pipeline.id)} className="cursor-pointer border-t border-aegis-border hover:bg-aegis-bg/40">
-                      <td className="px-5 py-4 font-mono text-aegis-blue">{pipeline.id}</td>
+                      <td className="px-5 py-4 font-mono text-aegis-blue">{pipeline.displayId || pipeline.id}</td>
                       <td className="px-5 py-4 font-semibold text-white">{pipeline.name}</td>
                       <td className="px-5 py-4 text-aegis-muted">{pipeline.dataset}</td>
                       <td className="px-5 py-4"><span className={cn("rounded-full px-2.5 py-1 text-xs font-semibold capitalize", badgeTone[pipeline.status])}>{pipeline.status.replace("_", " ")}</span></td>
@@ -33,7 +33,7 @@ export default function Pipelines() {
                       <td className="px-5 py-4"><button onClick={(event) => { event.stopPropagation(); retry(pipeline.id); }} className="ghost-button px-3 py-2"><RotateCcw className="h-4 w-4" /></button></td>
                     </tr>
                     {open === pipeline.id ? <tr><td colSpan="7" className="border-t border-aegis-border bg-aegis-bg/35 px-8 py-5"><PipelineTimeline steps={[{ title: "Ingestion", status: "completed" }, { title: "Quality", status: pipeline.status === "failed" ? "failed" : "completed" }, { title: "Approval", status: pipeline.status === "approval_required" ? "running" : "pending" }]} /></td></tr> : null}
-                  </>
+                  </Fragment>
                 ))}
               </tbody>
             </table>

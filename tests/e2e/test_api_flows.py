@@ -56,6 +56,35 @@ async def test_complete_pipeline_flow(client: AsyncClient) -> None:
 
 
 @pytest.mark.asyncio
+async def test_uploaded_dataset_can_start_listed_pipeline(client: AsyncClient) -> None:
+    """Starting a pipeline from an uploaded dataset makes it visible in the pipeline list."""
+
+    token = await _token(client)
+    headers = {"Authorization": f"Bearer {token}"}
+    dataset = await client.post(
+        "/datasets/",
+        headers=headers,
+        json={"name": "pipeline_visible_orders", "content": "id,amount\n1,10\n", "source_type": "csv"},
+    )
+    assert dataset.status_code == 200
+
+    started = await client.post(
+        "/pipelines/",
+        headers=headers,
+        json={"dataset_id": dataset.json()["id"], "name": "Visible Upload Pipeline"},
+    )
+    assert started.status_code == 200
+    pipeline = started.json()["pipeline"]
+    assert pipeline["dataset"] == "pipeline_visible_orders"
+    assert pipeline["status"] == "running"
+
+    listed = await client.get("/pipelines/", headers=headers)
+    assert listed.status_code == 200
+    pipelines = listed.json()["pipelines"]
+    assert any(item["id"] == pipeline["id"] for item in pipelines)
+
+
+@pytest.mark.asyncio
 async def test_approval_resumes_pipeline_to_completion(client: AsyncClient) -> None:
     """Approving a checkpointed pipeline resumes it to a terminal completed state."""
 

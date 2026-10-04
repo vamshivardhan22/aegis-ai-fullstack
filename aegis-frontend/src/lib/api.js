@@ -9,6 +9,24 @@ export async function registerAccount({ email, password, full_name, role }) {
   return data;
 }
 
+export async function uploadDataset(file) {
+  const form = new FormData();
+  form.append("file", file);
+  form.append("name", file.name);
+  const { data } = await api.post("/datasets/upload", form);
+  return data;
+}
+
+export async function listPipelines() {
+  const { data } = await api.get("/pipelines/");
+  return data;
+}
+
+export async function createPipeline({ dataset_id, name, config }) {
+  const { data } = await api.post("/pipelines/", { dataset_id, name, config });
+  return data;
+}
+
 export const tokenStore = {
   get: () => localStorage.getItem("aegis_token"),
   set: (token) => localStorage.setItem("aegis_token", token),

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { addMinutes, formatDistanceToNow } from "date-fns";
+import { listPipelines } from "../lib/api.js";
 import { pipelineSocket } from "../lib/websocket.js";
 
 const statuses = ["running", "completed", "failed", "approval_required", "pending"];
@@ -13,7 +14,7 @@ const fallbackPipelines = Array.from({ length: 8 }, (_, index) => ({
 }));
 
 export function usePipelines() {
-  const [pipelines, setPipelines] = useState(fallbackPipelines);
+  const [pipelines, setPipelines] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [wsStatus, setWsStatus] = useState("idle");
@@ -21,9 +22,17 @@ export function usePipelines() {
   const refresh = useCallback(async () => {
     setLoading(true);
     try {
-      setPipelines(fallbackPipelines);
+      const data = await listPipelines();
+      const livePipelines = data.pipelines || [];
+      setPipelines(livePipelines.map((pipeline) => ({
+        ...pipeline,
+        id: pipeline.id,
+        displayId: pipeline.display_id || pipeline.id,
+        started: pipeline.started_at || pipeline.created_at ? formatDistanceToNow(new Date(pipeline.started_at || pipeline.created_at), { addSuffix: true }) : "now"
+      })));
       setError("");
     } catch (err) {
+      setPipelines(fallbackPipelines);
       setError(err.message);
     } finally {
       setLoading(false);
@@ -39,7 +48,7 @@ export function usePipelines() {
     return () => pipelineSocket.disconnect();
   }, []);
 
-  const createPipeline = (pipeline) => setPipelines((current) => [{ ...pipeline, id: `PL-${Date.now()}`, status: "pending", progress: 0, started: "now" }, ...current]);
+  const createPipeline = (pipeline) => setPipelines((current) => [{ ...pipeline, displayId: pipeline.display_id || pipeline.id, status: pipeline.status || "pending", progress: pipeline.progress || 0, started: "now" }, ...current]);
   const retry = (id) => setPipelines((current) => current.map((pipeline) => pipeline.id === id ? { ...pipeline, status: "running", progress: 18 } : pipeline));
   const getPipeline = (id) => pipelines.find((pipeline) => pipeline.id === id);
 
