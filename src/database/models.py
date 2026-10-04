@@ -358,3 +358,44 @@ class Schedule(Base, UUIDMixin, TimestampMixin):
     next_run_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
     pipeline: Mapped["Pipeline"] = relationship(back_populates="schedules")
+
+
+class SavedQuery(Base, UUIDMixin, TimestampMixin):
+    """User-saved analytics SQL query and cached result metadata."""
+
+    __tablename__ = "saved_queries"
+
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), nullable=False)
+    dataset_id: Mapped[str] = mapped_column(ForeignKey("datasets.id"), nullable=False)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    sql: Mapped[str] = mapped_column(Text, nullable=False)
+    chart_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    last_result_json: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+
+
+class KpiDefinition(Base, UUIDMixin, TimestampMixin):
+    """Saved business KPI definition for a dataset."""
+
+    __tablename__ = "kpi_definitions"
+
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), nullable=False)
+    dataset_id: Mapped[str] = mapped_column(ForeignKey("datasets.id"), nullable=False)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    formula: Mapped[str] = mapped_column(Text, nullable=False)
+    target_value: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    alert_threshold: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    schedule: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    last_value: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    last_calculated_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+
+class KpiHistory(Base, UUIDMixin):
+    """Historical KPI calculation value."""
+
+    __tablename__ = "kpi_history"
+
+    kpi_definition_id: Mapped[str] = mapped_column(ForeignKey("kpi_definitions.id"), nullable=False)
+    value: Mapped[float] = mapped_column(Float, nullable=False)
+    calculated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    metadata_json: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)

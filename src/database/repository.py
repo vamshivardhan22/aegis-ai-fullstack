@@ -13,12 +13,15 @@ from src.database.models import (
     Deployment,
     Document,
     Job,
+    KpiDefinition,
+    KpiHistory,
     Lineage,
     Metric,
     Model,
     Pipeline,
     PipelineStatus,
     Project,
+    SavedQuery,
     Task,
     User,
 )
@@ -314,3 +317,78 @@ class LineageRepository(BaseRepository[Lineage]):
 
         result = await self.session.execute(select(Lineage).where(Lineage.source_dataset_id == dataset_id))
         return result.scalars().all()
+
+
+class SavedQueryRepository(BaseRepository[SavedQuery]):
+    """Repository for saved analytics queries."""
+
+    def __init__(self, session: AsyncSession) -> None:
+        """Initialize the saved query repository."""
+
+        super().__init__(session, SavedQuery)
+
+    async def list_by_user(self, user_id: str, limit: int = 100) -> Sequence[SavedQuery]:
+        """Return saved queries owned by a user."""
+
+        result = await self.session.execute(select(SavedQuery).where(SavedQuery.user_id == user_id).limit(limit))
+        return result.scalars().all()
+
+    async def list_by_dataset(self, dataset_id: str, limit: int = 100) -> Sequence[SavedQuery]:
+        """Return saved queries for a dataset."""
+
+        result = await self.session.execute(select(SavedQuery).where(SavedQuery.dataset_id == dataset_id).limit(limit))
+        return result.scalars().all()
+
+
+class KpiDefinitionRepository(BaseRepository[KpiDefinition]):
+    """Repository for KPI definitions."""
+
+    def __init__(self, session: AsyncSession) -> None:
+        """Initialize the KPI definition repository."""
+
+        super().__init__(session, KpiDefinition)
+
+    async def list_by_dataset(self, dataset_id: str, limit: int = 100) -> Sequence[KpiDefinition]:
+        """Return KPI definitions for a dataset."""
+
+        result = await self.session.execute(
+            select(KpiDefinition).where(KpiDefinition.dataset_id == dataset_id).limit(limit)
+        )
+        return result.scalars().all()
+
+    async def list_active(self, limit: int = 100) -> Sequence[KpiDefinition]:
+        """Return KPI definitions with a refresh schedule."""
+
+        result = await self.session.execute(select(KpiDefinition).where(KpiDefinition.schedule.is_not(None)).limit(limit))
+        return result.scalars().all()
+
+
+class KpiHistoryRepository(BaseRepository[KpiHistory]):
+    """Repository for KPI calculation history."""
+
+    def __init__(self, session: AsyncSession) -> None:
+        """Initialize the KPI history repository."""
+
+        super().__init__(session, KpiHistory)
+
+    async def list_by_kpi(self, kpi_definition_id: str, limit: int = 100) -> Sequence[KpiHistory]:
+        """Return KPI history ordered by most recent first."""
+
+        result = await self.session.execute(
+            select(KpiHistory)
+            .where(KpiHistory.kpi_definition_id == kpi_definition_id)
+            .order_by(KpiHistory.calculated_at.desc())
+            .limit(limit)
+        )
+        return result.scalars().all()
+
+    async def get_latest(self, kpi_definition_id: str) -> Optional[KpiHistory]:
+        """Return the latest KPI history record."""
+
+        result = await self.session.execute(
+            select(KpiHistory)
+            .where(KpiHistory.kpi_definition_id == kpi_definition_id)
+            .order_by(KpiHistory.calculated_at.desc())
+            .limit(1)
+        )
+        return result.scalar_one_or_none()
