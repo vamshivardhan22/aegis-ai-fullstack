@@ -48,6 +48,14 @@ class Settings(BaseSettings):
     AEGIS_SECRET_KEY: str = Field(default="change-me-in-production")
     AEGIS_JWT_ALGORITHM: str = "HS256"
     AEGIS_ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
+    AEGIS_CORS_ORIGINS: str = (
+        "http://localhost:5173,"
+        "http://localhost:5174,"
+        "http://127.0.0.1:5173,"
+        "http://127.0.0.1:5174,"
+        "http://localhost:3000"
+    )
+    AEGIS_CORS_ORIGIN_REGEX: Optional[str] = r"https://.*[.]app[.]github[.]dev"
     AEGIS_MAX_RETRIES: int = 3
     AEGIS_RETRY_DELAY_SECONDS: int = 5
     AEGIS_HUMAN_APPROVAL_RISK_THRESHOLD: float = 0.7
@@ -69,6 +77,12 @@ class Settings(BaseSettings):
         """Return True when the database URL contains an async driver."""
 
         return "+aiosqlite" in self.AEGIS_DB_URL or "+asyncpg" in self.AEGIS_DB_URL
+
+    @property
+    def cors_origins(self) -> list[str]:
+        """Return configured CORS origins as a normalized list."""
+
+        return [origin.strip() for origin in self.AEGIS_CORS_ORIGINS.split(",") if origin.strip()]
 
 
 @lru_cache
