@@ -32,7 +32,7 @@ class LangChainProvider:
                 from langchain_anthropic import ChatAnthropic
 
                 return ChatAnthropic(
-                    model=self.settings.AEGIS_LLM_MODEL,
+                    model_name=self.settings.AEGIS_LLM_MODEL,
                     temperature=self.settings.AEGIS_LLM_TEMPERATURE,
                     timeout=self.settings.AEGIS_LLM_TIMEOUT,
                     api_key=self.settings.AEGIS_ANTHROPIC_API_KEY,
