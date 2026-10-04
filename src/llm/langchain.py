@@ -36,6 +36,7 @@ class LangChainProvider:
                     temperature=self.settings.AEGIS_LLM_TEMPERATURE,
                     timeout=self.settings.AEGIS_LLM_TIMEOUT,
                     api_key=self.settings.AEGIS_ANTHROPIC_API_KEY,
+                    stop=None,
                 )
             if provider == "google":
                 from langchain_google_genai import ChatGoogleGenerativeAI
