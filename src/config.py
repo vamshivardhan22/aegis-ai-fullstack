@@ -35,6 +35,7 @@ class Settings(BaseSettings):
     AEGIS_LLM_MODEL: str = "gpt-4o-mini"
     AEGIS_LLM_TEMPERATURE: float = 0.2
     AEGIS_LLM_TIMEOUT: int = 120
+    AEGIS_OLLAMA_URL: str = "http://localhost:11434"
     AEGIS_OPENAI_API_KEY: Optional[str] = None
     AEGIS_ANTHROPIC_API_KEY: Optional[str] = None
     AEGIS_GOOGLE_API_KEY: Optional[str] = None

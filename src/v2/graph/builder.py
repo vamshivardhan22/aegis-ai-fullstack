@@ -7,7 +7,7 @@ Dependencies are injected into the builder so the checkpointed state remains JSO
 from __future__ import annotations
 
 import io
-from typing import Any, Callable
+from typing import Any, Callable, cast
 from uuid import uuid4
 
 import pandas as pd
@@ -15,8 +15,6 @@ from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import interrupt
 
-from src.agents.pii import PIIDetectionAgent
-from src.agents.transform import TransformAgent
 from src.v2.graph.state import AegisState
 
 
@@ -156,11 +154,11 @@ def build_aegis_graph(
 
 def initial_state(**kwargs: Any) -> AegisState:
     """Build a valid serializable graph input."""
-    return {
+    return cast(AegisState, {
         "request_id": str(uuid4()),
         "status": "pending",
         "retry_count": 0,
         "max_retries": 2,
         "audit_events": [],
         **kwargs,
-    }
+    })

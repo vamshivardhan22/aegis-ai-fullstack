@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import Any, Awaitable, Callable, Optional, TypedDict
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -95,7 +96,7 @@ class PipelineGraph:
     async def ainvoke(self, state: PipelineState) -> PipelineState:
         """Execute the graph until END or a checkpoint interrupt."""
 
-        current = self._next_after("START")
+        current = state.get("current_step") or self._next_after("START")
         while current != "END":
             try:
                 state["current_step"] = current
@@ -159,6 +160,44 @@ async def resume_from_checkpoint(pipeline_id: str) -> PipelineState:
         state["current_step"] = "clean" if state.get("current_step") == "human_approval" else state.get("current_step", "clean")
         await PipelineRepository(session).update(pipeline_id, {"status": PipelineStatus.RUNNING, "checkpoint_data": state})
         return state
+
+
+async def resume_and_run(pipeline_id: str) -> PipelineState:
+    """Resume a checkpointed pipeline after approval and run it to completion."""
+
+    state = await resume_from_checkpoint(pipeline_id)
+    state["pipeline_id"] = pipeline_id
+    latest_decision = state.get("human_decisions", {}).get("latest", {})
+    if latest_decision.get("decision") in {"approve", "approved"}:
+        state["human_decisions"]["latest"]["decision"] = "approved"
+    state["risk_level"] = "medium"
+    state["paused"] = False
+    state["current_step"] = "clean" if state.get("current_step") == "human_approval" else state.get("current_step", "clean")
+
+    final_state = await build_pipeline_graph().ainvoke(state)
+    status = PipelineStatus.FAILED if final_state.get("error_message") else PipelineStatus.COMPLETED
+
+    async with AsyncSessionLocal() as session:
+        await PipelineRepository(session).update(
+            pipeline_id,
+            {
+                "status": status,
+                "current_state": final_state.get("current_step", "monitor"),
+                "checkpoint_data": dict(final_state),
+                "error_message": final_state.get("error_message"),
+                "completed_at": datetime.now(UTC) if status == PipelineStatus.COMPLETED else None,
+            },
+        )
+        await AuditLogRepository(session).log_action(
+            action="PIPELINE_RESUMED_FINISHED",
+            resource_type="pipeline",
+            resource_id=pipeline_id,
+            before_json={"status": PipelineStatus.RUNNING.value},
+            after_json={"status": status.value, "current_state": final_state.get("current_step")},
+            rationale="Pipeline resumed after human approval and reached a terminal state",
+            confidence=1.0,
+        )
+    return final_state
 
 
 async def log_transition(session: AsyncSession | None, state: PipelineState, step: str) -> None:

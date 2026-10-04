@@ -2,6 +2,10 @@
 
 import pytest
 from httpx import AsyncClient
+from sqlalchemy import select
+
+from src.database.models import AuditLog, Dataset, Pipeline, PipelineStatus, Project
+from src.database.session import AsyncSessionLocal
 
 
 async def _token(client: AsyncClient, role: str = "data_engineer") -> str:
@@ -49,3 +53,62 @@ async def test_complete_pipeline_flow(client: AsyncClient) -> None:
     assert chat.status_code == 200
     profile = await client.get("/auth/me", headers=headers)
     assert profile.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_approval_resumes_pipeline_to_completion(client: AsyncClient) -> None:
+    """Approving a checkpointed pipeline resumes it to a terminal completed state."""
+
+    token = await _token(client)
+    headers = {"Authorization": f"Bearer {token}"}
+    profile = await client.get("/auth/me", headers=headers)
+    user_id = profile.json()["id"]
+
+    async with AsyncSessionLocal() as session:
+        project = Project(name="approval_project", description="Approval flow", owner_id=user_id, config={})
+        session.add(project)
+        await session.flush()
+        dataset = Dataset(project_id=project.id, name="approval_dataset", source_type="csv", row_count=2, column_count=2)
+        session.add(dataset)
+        await session.flush()
+        pipeline = Pipeline(
+            project_id=project.id,
+            dataset_id=dataset.id,
+            name="approval_pipeline",
+            status=PipelineStatus.APPROVAL_REQUIRED,
+            current_state="human_approval",
+            checkpoint_data={
+                "pipeline_id": "",
+                "project_id": project.id,
+                "dataset_id": dataset.id,
+                "current_step": "human_approval",
+                "completed_steps": ["ingest", "schema"],
+                "artifacts": {},
+                "quality_score": 0.92,
+                "human_decisions": {},
+                "needs_transform": False,
+                "risk_level": "high",
+                "paused": True,
+            },
+        )
+        session.add(pipeline)
+        await session.flush()
+        pipeline.checkpoint_data["pipeline_id"] = pipeline.id
+        pipeline_id = pipeline.id
+        await session.commit()
+
+    response = await client.post(
+        f"/approvals/{pipeline_id}/approve",
+        headers=headers,
+        json={"decision": "approve", "rationale": "Approved by regression test.", "modifications": {}, "alternative_action": None},
+    )
+    assert response.status_code == 200
+
+    async with AsyncSessionLocal() as session:
+        pipeline = await session.get(Pipeline, pipeline_id)
+        assert pipeline is not None
+        assert pipeline.status == PipelineStatus.COMPLETED
+        assert pipeline.current_state == "monitor"
+        audit_result = await session.execute(select(AuditLog.action).where(AuditLog.resource_id == pipeline_id))
+        actions = set(audit_result.scalars().all())
+        assert {"HUMAN_DECISION", "PIPELINE_RESUMED_FINISHED"}.issubset(actions)

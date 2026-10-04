@@ -13,7 +13,7 @@ from src.database.models import Pipeline, PipelineStatus
 from src.database.models import User, UserRole
 from src.database.repository import AuditLogRepository, PipelineRepository
 from src.database.session import get_async_session
-from src.orchestrator.langgraph import resume_from_checkpoint
+from src.orchestrator.langgraph import resume_and_run
 
 router = APIRouter()
 
@@ -107,10 +107,7 @@ async def approve_pipeline(
         confidence=1.0,
     )
     await ingest_human_decision(session, pipeline_id, decision.model_dump())
-    try:
-        await resume_from_checkpoint(pipeline_id)
-    except Exception:
-        await pipeline_repo.update(pipeline_id, {"status": PipelineStatus.RUNNING})
+    await resume_and_run(pipeline_id)
     return {"status": "resumed", "pipeline_id": pipeline_id}
 
 
