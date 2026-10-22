@@ -399,3 +399,18 @@ class KpiHistory(Base, UUIDMixin):
     value: Mapped[float] = mapped_column(Float, nullable=False)
     calculated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
     metadata_json: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+
+
+class ChatMessage(Base, UUIDMixin, TimestampMixin):
+    """Persisted per-user chat turn with optional project scope."""
+
+    __tablename__ = "chat_messages"
+    __table_args__ = (
+        Index("ix_chat_messages_user_created", "user_id", "created_at"),
+        Index("ix_chat_messages_project_created", "project_id", "created_at"),
+    )
+
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), nullable=False)
+    project_id: Mapped[Optional[str]] = mapped_column(ForeignKey("projects.id"), nullable=True)
+    question: Mapped[str] = mapped_column(Text, nullable=False)
+    response_json: Mapped[dict] = mapped_column(JSON, nullable=False)
