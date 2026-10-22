@@ -132,7 +132,7 @@ async def test_dataset_and_lineage_are_project_scoped(client: AsyncClient) -> No
     dataset_id = created.json()["id"]
 
     hidden_dataset = await client.get(f"/datasets/{dataset_id}", headers=analyst_headers)
-    hidden_lineage = await client.get(f"/lineage/datasets/{dataset_id}", headers=analyst_headers)
+    hidden_lineage = await client.get(f"/lineage/datasets/{dataset_id}", headers=analyst_headers)\n    hidden_download = await client.get(f"/datasets/{dataset_id}/download?layer=bronze", headers=analyst_headers)
     analyst_datasets = await client.get("/datasets/", headers=analyst_headers)
     assert hidden_dataset.status_code == 404
     assert hidden_lineage.status_code == 404
