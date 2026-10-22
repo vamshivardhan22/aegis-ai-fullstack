@@ -44,3 +44,12 @@ def test_profile_records_nulls_duplicates_and_checksum() -> None:
     assert profile["duplicate_rows"] == 1
     assert len(profile["source_sha256"]) == 64
     assert 0 <= profile["quality_score"] <= 1
+
+def test_product_name_is_not_misclassified_as_personal_data() -> None:
+    frame = pd.DataFrame({
+        "product_name": ["Laptop", "Desk"],
+        "customer_name": ["Alice Smith", "Bob Jones"],
+    })
+    detected = _detect_pii(frame)
+    assert "product_name" not in detected
+    assert detected["customer_name"] == "person_name"
