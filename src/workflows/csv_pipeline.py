@@ -28,7 +28,7 @@ MAX_PIPELINE_BYTES = 50 * 1024 * 1024
 MAX_PIPELINE_COLUMNS = 500
 _PII_NAME_HINT = re.compile(
     r"(^|[_\s-])(email|e_mail|phone|mobile|ssn|social_security|address|full_name|first_name|last_name|"
-    r"customer_name|name|date_of_birth|dob|credit_card|card_number|account_number|tax_id|passport|medical_record|ip_address)([_\s-]|$)"
+    r"customer_name|date_of_birth|dob|credit_card|card_number|account_number|tax_id|passport|medical_record|ip_address)([_\s-]|$)"
 )
 _EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 _PHONE = re.compile(r"^\+?[0-9][0-9\s().-]{7,}[0-9]$")
