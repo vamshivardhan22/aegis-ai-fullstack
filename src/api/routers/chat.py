@@ -31,9 +31,18 @@ async def ask_chat(
     current_user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
     """Answer from authorized facts and persist the resulting conversation turn."""
-    if payload.project_id:
-        await require_project_access(session, current_user, payload.project_id)
-    direct = await _answer_from_database(payload, session, current_user)
+    effective_project_id = payload.project_id
+    if effective_project_id:
+        await require_project_access(session, current_user, effective_project_id)
+    elif current_user.role != UserRole.ADMIN:
+        owned = await session.execute(
+            select(Project.id).where(Project.owner_id == current_user.id).order_by(Project.created_at.asc()).limit(2)
+        )
+        owned_ids = list(owned.scalars().all())
+        if len(owned_ids) == 1:
+            effective_project_id = owned_ids[0]
+    scoped_payload = payload.model_copy(update={"project_id": effective_project_id})
+    direct = await _answer_from_database(scoped_payload, session, current_user)
     if direct is not None:
         response = direct
     else:
@@ -50,7 +59,7 @@ async def ask_chat(
             await llm.close()
     message = ChatMessage(
         user_id=current_user.id,
-        project_id=payload.project_id,
+        project_id=effective_project_id,
         question=payload.question,
         response_json=response,
     )
