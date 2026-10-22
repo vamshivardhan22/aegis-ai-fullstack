@@ -180,7 +180,7 @@ class DatasetOperationAgent(BaseAgent):
             raise ValidationError("Sensitive columns cannot be used as ML features", {"columns": sensitive_features})
         if target in features:
             raise ValidationError("Target column cannot also be a feature")
-        training = frame.loc[:, features + [target]].dropna(subset=[target]).copy()
+        training = frame.loc[:, [*features, target]].dropna(subset=[target]).copy()
         if len(training) < 10:
             raise ValidationError("At least 10 non-null target rows are required for a train/test evaluation")
         if task == "regression":
