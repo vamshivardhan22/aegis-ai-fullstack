@@ -8,7 +8,7 @@ from typing import Any
 from uuid import uuid4
 
 import pandas as pd
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -206,6 +206,33 @@ async def list_datasets(
             "has_bronze_artifact": bool(item.bronze_path),
         } for item in datasets
     ]}
+
+
+@router.get("/{dataset_id}/download")
+async def download_dataset(
+    dataset_id: str,
+    layer: str = "silver",
+    session: AsyncSession = Depends(get_async_session),
+    current_user: User = Depends(get_current_user),
+) -> Response:
+    """Download an authorized dataset layer as CSV."""
+    if layer not in {"bronze", "silver", "gold"}:
+        raise HTTPException(status_code=422, detail="layer must be bronze, silver, or gold")
+    dataset = await require_dataset_access(session, current_user, dataset_id)
+    artifact_path = getattr(dataset, f"{layer}_path")
+    if not artifact_path:
+        raise HTTPException(status_code=404, detail=f"No {layer} artifact is available")
+    data = await get_storage().read(artifact_path)
+    digest = hashlib.sha256(data).hexdigest()
+    safe_name = re.sub(r"[^A-Za-z0-9._-]", "_", dataset.name)[:100]
+    return Response(
+        content=data,
+        media_type="text/csv; charset=utf-8",
+        headers={
+            "Content-Disposition": f'attachment; filename="{safe_name}-{layer}.csv"',
+            "X-Content-SHA256": digest,
+        },
+    )
 
 
 @router.get("/{dataset_id}")
