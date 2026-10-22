@@ -10,11 +10,12 @@ import Dashboard from "./pages/Dashboard.jsx";
 import Lineage from "./pages/Lineage.jsx";
 import Login from "./pages/Login.jsx";
 import Monitoring from "./pages/Monitoring.jsx";
+import Models from "./pages/Models.jsx";
 import Pipelines from "./pages/Pipelines.jsx";
 import Signup from "./pages/Signup.jsx";
 import Upload from "./pages/Upload.jsx";
 
-const titles = { "/": "Dashboard", "/pipelines": "Pipelines", "/agents": "Agents", "/chat": "Aegis Chat", "/approvals": "Approvals", "/lineage": "Lineage", "/upload": "Upload Dataset", "/monitoring": "Monitoring", "/admin": "Admin" };
+const titles = { "/": "Dashboard", "/pipelines": "Pipelines", "/agents": "Agents", "/chat": "Aegis Chat", "/approvals": "Approvals", "/lineage": "Lineage", "/upload": "Upload Dataset", "/monitoring": "Monitoring", "/models": "Model Registry", "/admin": "Admin" };
 
 function Protected({ children, adminOnly = false }) {
   const { isAuthenticated, isAdmin, loading } = useAuth();
@@ -57,6 +58,7 @@ export default function App() {
       <Route path="/lineage" element={<Protected><Shell><Lineage /></Shell></Protected>} />
       <Route path="/upload" element={<Protected><Shell><Upload /></Shell></Protected>} />
       <Route path="/monitoring" element={<Protected><Shell><Monitoring /></Shell></Protected>} />
+      <Route path="/models" element={<Protected><Shell><Models /></Shell></Protected>} />
       <Route path="/admin" element={<Protected adminOnly><Shell><Admin /></Shell></Protected>} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
