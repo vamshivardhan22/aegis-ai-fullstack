@@ -114,3 +114,53 @@ async def test_approval_resumes_pipeline_to_completion(client: AsyncClient) -> N
         actions_result = await session.execute(select(AuditLog.action).where(AuditLog.resource_id == pipeline_id))
         actions = set(actions_result.scalars().all())
         assert {"HUMAN_APPROVAL_GRANTED", "PIPELINE_PUBLISHED"}.issubset(actions)
+
+
+@pytest.mark.asyncio
+async def test_dataset_and_lineage_are_project_scoped(client: AsyncClient) -> None:
+    """A user cannot fetch another user's dataset or lineage by guessing an ID."""
+    engineer_token = await _token(client, role="data_engineer")
+    analyst_token = await _token(client, role="analyst")
+    engineer_headers = {"Authorization": f"Bearer {engineer_token}"}
+    analyst_headers = {"Authorization": f"Bearer {analyst_token}"}
+    created = await client.post(
+        "/datasets/",
+        headers=engineer_headers,
+        json={"name": "private_orders", "content": "order_id,amount\n1,10\n", "source_type": "csv"},
+    )
+    assert created.status_code == 200, created.text
+    dataset_id = created.json()["id"]
+
+    hidden_dataset = await client.get(f"/datasets/{dataset_id}", headers=analyst_headers)
+    hidden_lineage = await client.get(f"/lineage/datasets/{dataset_id}", headers=analyst_headers)
+    analyst_datasets = await client.get("/datasets/", headers=analyst_headers)
+    assert hidden_dataset.status_code == 404
+    assert hidden_lineage.status_code == 404
+    assert analyst_datasets.status_code == 200
+    assert analyst_datasets.json()["datasets"] == []
+
+
+@pytest.mark.asyncio
+async def test_non_sensitive_csv_pipeline_publishes_output(client: AsyncClient) -> None:
+    """A valid non-sensitive CSV runs through quality checks and creates a lineage-linked output."""
+    token = await _token(client, role="data_engineer")
+    headers = {"Authorization": f"Bearer {token}"}
+    created = await client.post(
+        "/datasets/",
+        headers=headers,
+        json={"name": "clean_orders", "content": "order_id,amount\n1,10\n2,20\n", "source_type": "csv"},
+    )
+    assert created.status_code == 200, created.text
+    dataset_id = created.json()["id"]
+
+    started = await client.post("/pipelines/", headers=headers, json={"dataset_id": dataset_id})
+    assert started.status_code == 200, started.text
+    pipeline = started.json()["pipeline"]
+    assert pipeline["status"] == PipelineStatus.COMPLETED.value
+    output_id = started.json()["execution"]["output_dataset_id"]
+    output = await client.get(f"/datasets/{output_id}", headers=headers)
+    assert output.status_code == 200
+    assert output.json()["silver_path"]
+    lineage = await client.get(f"/lineage/datasets/{dataset_id}", headers=headers)
+    assert lineage.status_code == 200
+    assert any(edge["target"] == output_id for edge in lineage.json()["edges"])
