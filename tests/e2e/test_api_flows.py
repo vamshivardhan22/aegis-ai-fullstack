@@ -6,6 +6,7 @@ from sqlalchemy import select
 
 from src.database.models import AuditLog, Dataset, Pipeline, PipelineStatus, Project
 from src.database.session import AsyncSessionLocal
+from src.storage import get_storage
 
 
 async def _token(client: AsyncClient, role: str = "data_engineer") -> str:
@@ -56,38 +57,8 @@ async def test_complete_pipeline_flow(client: AsyncClient) -> None:
 
 
 @pytest.mark.asyncio
-async def test_uploaded_dataset_can_start_listed_pipeline(client: AsyncClient) -> None:
-    """Starting a pipeline from an uploaded dataset makes it visible in the pipeline list."""
-
-    token = await _token(client)
-    headers = {"Authorization": f"Bearer {token}"}
-    dataset = await client.post(
-        "/datasets/",
-        headers=headers,
-        json={"name": "pipeline_visible_orders", "content": "id,amount\n1,10\n", "source_type": "csv"},
-    )
-    assert dataset.status_code == 200
-
-    started = await client.post(
-        "/pipelines/",
-        headers=headers,
-        json={"dataset_id": dataset.json()["id"], "name": "Visible Upload Pipeline"},
-    )
-    assert started.status_code == 200
-    pipeline = started.json()["pipeline"]
-    assert pipeline["dataset"] == "pipeline_visible_orders"
-    assert pipeline["status"] == "running"
-
-    listed = await client.get("/pipelines/", headers=headers)
-    assert listed.status_code == 200
-    pipelines = listed.json()["pipelines"]
-    assert any(item["id"] == pipeline["id"] for item in pipelines)
-
-
-@pytest.mark.asyncio
 async def test_approval_resumes_pipeline_to_completion(client: AsyncClient) -> None:
-    """Approving a checkpointed pipeline resumes it to a terminal completed state."""
-
+    """A sensitive CSV run pauses, then publishes only after a scoped approval."""
     token = await _token(client)
     headers = {"Authorization": f"Bearer {token}"}
     profile = await client.get("/auth/me", headers=headers)
@@ -97,47 +68,99 @@ async def test_approval_resumes_pipeline_to_completion(client: AsyncClient) -> N
         project = Project(name="approval_project", description="Approval flow", owner_id=user_id, config={})
         session.add(project)
         await session.flush()
-        dataset = Dataset(project_id=project.id, name="approval_dataset", source_type="csv", row_count=2, column_count=2)
+        project_id = project.id
+        dataset = Dataset(
+            project_id=project.id,
+            name="approval_dataset",
+            source_type="csv",
+            bronze_path=f"bronze/{project.id}/approval_dataset.csv",
+            row_count=2,
+            column_count=3,
+        )
         session.add(dataset)
         await session.flush()
-        pipeline = Pipeline(
-            project_id=project.id,
-            dataset_id=dataset.id,
-            name="approval_pipeline",
-            status=PipelineStatus.APPROVAL_REQUIRED,
-            current_state="human_approval",
-            checkpoint_data={
-                "pipeline_id": "",
-                "project_id": project.id,
-                "dataset_id": dataset.id,
-                "current_step": "human_approval",
-                "completed_steps": ["ingest", "schema"],
-                "artifacts": {},
-                "quality_score": 0.92,
-                "human_decisions": {},
-                "needs_transform": False,
-                "risk_level": "high",
-                "paused": True,
-            },
-        )
-        session.add(pipeline)
-        await session.flush()
-        pipeline.checkpoint_data["pipeline_id"] = pipeline.id
-        pipeline_id = pipeline.id
+        dataset_id = dataset.id
         await session.commit()
+
+    await get_storage().write(
+        f"bronze/{project_id}/approval_dataset.csv",
+        b"order_id,customer_email,amount\n1,one@example.com,10\n2,two@example.com,20\n",
+        "text/csv",
+    )
+    started = await client.post("/pipelines/", headers=headers, json={"dataset_id": dataset_id})
+    assert started.status_code == 200, started.text
+    pipeline_id = started.json()["pipeline"]["id"]
+    assert started.json()["pipeline"]["status"] == PipelineStatus.APPROVAL_REQUIRED.value
 
     response = await client.post(
         f"/approvals/{pipeline_id}/approve",
         headers=headers,
-        json={"decision": "approve", "rationale": "Approved by regression test.", "modifications": {}, "alternative_action": None},
+        json={"decision": "approve", "rationale": "Approved after PII masking."},
     )
-    assert response.status_code == 200
+    assert response.status_code == 200, response.text
+    assert response.json()["status"] == PipelineStatus.COMPLETED.value
 
     async with AsyncSessionLocal() as session:
         pipeline = await session.get(Pipeline, pipeline_id)
         assert pipeline is not None
         assert pipeline.status == PipelineStatus.COMPLETED
-        assert pipeline.current_state == "monitor"
-        audit_result = await session.execute(select(AuditLog.action).where(AuditLog.resource_id == pipeline_id))
-        actions = set(audit_result.scalars().all())
-        assert {"HUMAN_DECISION", "PIPELINE_RESUMED_FINISHED"}.issubset(actions)
+        assert pipeline.current_state == "published"
+        assert pipeline.checkpoint_data["pii_columns"]["customer_email"] == "email"
+        assert pipeline.checkpoint_data["human_decisions"]["latest"]["decision"] == "approved"
+        output = await session.get(Dataset, pipeline.checkpoint_data["output_dataset_id"])
+        assert output is not None
+        assert output.silver_path == pipeline.checkpoint_data["candidate_artifact"]
+        assert output.row_count == 2
+        actions_result = await session.execute(select(AuditLog.action).where(AuditLog.resource_id == pipeline_id))
+        actions = set(actions_result.scalars().all())
+        assert {"HUMAN_APPROVAL_GRANTED", "PIPELINE_PUBLISHED"}.issubset(actions)
+
+
+@pytest.mark.asyncio
+async def test_dataset_and_lineage_are_project_scoped(client: AsyncClient) -> None:
+    """A user cannot fetch another user's dataset or lineage by guessing an ID."""
+    engineer_token = await _token(client, role="data_engineer")
+    analyst_token = await _token(client, role="analyst")
+    engineer_headers = {"Authorization": f"Bearer {engineer_token}"}
+    analyst_headers = {"Authorization": f"Bearer {analyst_token}"}
+    created = await client.post(
+        "/datasets/",
+        headers=engineer_headers,
+        json={"name": "private_orders", "content": "order_id,amount\n1,10\n", "source_type": "csv"},
+    )
+    assert created.status_code == 200, created.text
+    dataset_id = created.json()["id"]
+
+    hidden_dataset = await client.get(f"/datasets/{dataset_id}", headers=analyst_headers)
+    hidden_lineage = await client.get(f"/lineage/datasets/{dataset_id}", headers=analyst_headers)
+    analyst_datasets = await client.get("/datasets/", headers=analyst_headers)
+    assert hidden_dataset.status_code == 404
+    assert hidden_lineage.status_code == 404
+    assert analyst_datasets.status_code == 200
+    assert analyst_datasets.json()["datasets"] == []
+
+
+@pytest.mark.asyncio
+async def test_non_sensitive_csv_pipeline_publishes_output(client: AsyncClient) -> None:
+    """A valid non-sensitive CSV runs through quality checks and creates a lineage-linked output."""
+    token = await _token(client, role="data_engineer")
+    headers = {"Authorization": f"Bearer {token}"}
+    created = await client.post(
+        "/datasets/",
+        headers=headers,
+        json={"name": "clean_orders", "content": "order_id,amount\n1,10\n2,20\n", "source_type": "csv"},
+    )
+    assert created.status_code == 200, created.text
+    dataset_id = created.json()["id"]
+
+    started = await client.post("/pipelines/", headers=headers, json={"dataset_id": dataset_id})
+    assert started.status_code == 200, started.text
+    pipeline = started.json()["pipeline"]
+    assert pipeline["status"] == PipelineStatus.COMPLETED.value
+    output_id = started.json()["execution"]["output_dataset_id"]
+    output = await client.get(f"/datasets/{output_id}", headers=headers)
+    assert output.status_code == 200
+    assert output.json()["silver_path"]
+    lineage = await client.get(f"/lineage/datasets/{dataset_id}", headers=headers)
+    assert lineage.status_code == 200
+    assert any(edge["target"] == output_id for edge in lineage.json()["edges"])
