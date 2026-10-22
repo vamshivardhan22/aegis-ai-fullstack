@@ -137,6 +137,7 @@ async def test_dataset_and_lineage_are_project_scoped(client: AsyncClient) -> No
     analyst_datasets = await client.get("/datasets/", headers=analyst_headers)
     assert hidden_dataset.status_code == 404
     assert hidden_lineage.status_code == 404
+    assert hidden_download.status_code == 404
     assert analyst_datasets.status_code == 200
     assert analyst_datasets.json()["datasets"] == []
 
@@ -162,6 +163,10 @@ async def test_non_sensitive_csv_pipeline_publishes_output(client: AsyncClient) 
     output = await client.get(f"/datasets/{output_id}", headers=headers)
     assert output.status_code == 200
     assert output.json()["silver_path"]
+    download = await client.get(f"/datasets/{output_id}/download?layer=silver", headers=headers)
+    assert download.status_code == 200
+    assert "text/csv" in download.headers["content-type"]
+    assert "order_id,amount" in download.text
     lineage = await client.get(f"/lineage/datasets/{dataset_id}", headers=headers)
     assert lineage.status_code == 200
     assert any(edge["target"] == output_id for edge in lineage.json()["edges"])
