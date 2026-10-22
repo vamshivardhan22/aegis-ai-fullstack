@@ -19,7 +19,7 @@ export async function resumePipeline(pipelineId) {
   return data;
 }
 
-export async function uploadDataset(file, name = file.name.replace(/\\.csv$/i, "")) {
+export async function uploadDataset(file, name = file.name.replace(/\.csv$/i, "")) {
   const form = new FormData();
   form.append("file", file);
   form.append("name", name);
