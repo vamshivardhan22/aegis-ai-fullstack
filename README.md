@@ -18,6 +18,8 @@ This repository contains both sides of the application:
 - `tests/`, `scripts/`, `.github/workflows/`: verification, E2E, security, load, and CI checks.
 - `docker-compose.yml`, `Dockerfile`, `k8s/`: local and cluster-oriented deployment assets.
 
+For the implemented CSV-first workflow, API examples, approval walkthrough, and remaining production gates, see [the End-to-End Runbook](docs/END_TO_END_RUNBOOK.md).
+
 ## Why AGIES?
 
 Autonomous data workflows introduce a control problem. An agent may be able to ingest data, transform it, deploy a model wrapper, scan for drift, or answer operational questions, but those actions still need boundaries.
