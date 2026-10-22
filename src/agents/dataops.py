@@ -105,7 +105,9 @@ class DatasetOperationAgent(BaseAgent):
         self, source: Dataset, source_bytes: bytes, frame: pd.DataFrame, plan: dict[str, Any], operation: str
     ) -> dict[str, Any]:
         """Write an immutable derived artifact and create its dataset/lineage records."""
-        if frame.empty:\n            raise ValidationError("Transformation produced zero rows; derived dataset was not published")\n        output_bytes = frame.to_csv(index=False).encode("utf-8")
+        if frame.empty:
+            raise ValidationError("Transformation produced zero rows; derived dataset was not published")
+        output_bytes = frame.to_csv(index=False).encode("utf-8")
         profile = _profile(frame, source_bytes)
         profile["output_sha256"] = hashlib.sha256(output_bytes).hexdigest()
         source_profile = source.profile_json or {}
