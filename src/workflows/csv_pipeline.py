@@ -282,6 +282,8 @@ async def _transform_node(state: CSVWorkflowState) -> CSVWorkflowState:
         "output_column_count": int(len(transformed.columns)),
         "output_size_bytes": len(output_bytes),
         "output_sha256": hashlib.sha256(output_bytes).hexdigest(),
+        "output_profile": output_profile,
+        "output_quality_score": output_profile["quality_score"],
         "transformation_plan": plan,
         "needs_approval": bool(pii_columns or config.get("require_approval")),
         "human_decisions": state.get("human_decisions", {}),
@@ -428,11 +430,11 @@ async def _publish_candidate(
     dataset_values = {
         "silver_path": candidate_path,
         "schema_json": checkpoint.get("output_schema"),
-        "profile_json": {**(checkpoint.get("profile") or {}), "output_sha256": checkpoint.get("output_sha256")},
+        "profile_json": {**(checkpoint.get("output_profile") or {}), "input_profile": checkpoint.get("profile") or {}, "output_sha256": checkpoint.get("output_sha256"), "masking_applied": bool(checkpoint.get("pii_columns")), "pii_columns": checkpoint.get("pii_columns", {})},
         "row_count": checkpoint.get("output_row_count"),
         "column_count": checkpoint.get("output_column_count"),
         "size_bytes": len(output_bytes),
-        "quality_score": checkpoint.get("quality_score"),
+        "quality_score": checkpoint.get("output_quality_score", checkpoint.get("quality_score")),
         "version": source.version + 1,
     }
     if target is None:
