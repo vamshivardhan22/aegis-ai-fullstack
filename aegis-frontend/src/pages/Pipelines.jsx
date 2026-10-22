@@ -40,7 +40,7 @@ export default function Pipelines() {
 
   useEffect(() => {
     listDatasets()
-      .then((items) => { setDatasets(items); setDatasetError(""); })
+      .then((items) => { setDatasets(items.filter((item) => item.has_bronze_artifact)); setDatasetError(""); })
       .catch((err) => setDatasetError(err.response?.data?.detail || err.message || "Unable to load datasets."));
   }, []);
 
