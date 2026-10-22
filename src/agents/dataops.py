@@ -109,6 +109,8 @@ class DatasetOperationAgent(BaseAgent):
             raise ValidationError("Transformation produced zero rows; derived dataset was not published")
         output_bytes = frame.to_csv(index=False).encode("utf-8")
         profile = _profile(frame, source_bytes)
+        if profile["non_finite_cells"]:
+            raise ValidationError("Derived dataset contains non-finite numeric values")
         profile["output_sha256"] = hashlib.sha256(output_bytes).hexdigest()
         source_profile = source.profile_json or {}
         profile["masking_applied"] = bool(source_profile.get("masking_applied"))
