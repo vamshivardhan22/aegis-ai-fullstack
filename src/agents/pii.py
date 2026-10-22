@@ -171,9 +171,10 @@ class PIIDetectionAgent(BaseAgent):
     async def _score_column(self, column: str, series: pd.Series) -> tuple[str, float]:
         """Score a column using name heuristics, regexes, spaCy, and optional LLM fallback."""
 
-        lowered = column.lower()
+        normalized = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", column).lower()
+        tokens = set(re.split(r"[^a-z0-9]+", normalized))
         for hint, pii_type in self.NAME_HINTS.items():
-            if hint in lowered:
+            if hint in tokens or (hint in {"credit", "card"} and "credit_card" in normalized):
                 return pii_type, 0.92
         values = series.dropna().astype(str).tolist()
         if not values:
