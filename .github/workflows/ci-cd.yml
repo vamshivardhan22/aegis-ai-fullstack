@@ -94,8 +94,7 @@ jobs:
 
   e2e-test:
     name: Final E2E gate
-    if: github.event_name == 'push'
-    needs: [deploy-staging]
+    needs: [integration-test, build]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
