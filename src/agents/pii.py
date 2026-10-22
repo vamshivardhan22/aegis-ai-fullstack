@@ -5,12 +5,14 @@ import hmac
 import io
 import json
 import re
-from typing import Any\nfrom uuid import uuid4
+from typing import Any
+from uuid import uuid4
 
 import pandas as pd
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.agents.base import BaseAgent\nfrom src.core.exceptions import AgentError, ValidationError
+from src.agents.base import BaseAgent
+from src.core.exceptions import AgentError, ValidationError
 from src.config import get_settings
 from src.core.logging import configure_logging
 from src.database.models import Alert, AlertSeverity, Dataset, Lineage
@@ -61,7 +63,7 @@ class PIIDetectionAgent(BaseAgent):
                     raise ValidationError("Dataset artifact is not accessible")
             raw_data = await self.storage.read(artifact_path)
             if len(raw_data) > 50 * 1024 * 1024:
-                return {"pii_failed": True, "error": "PII scan input exceeds the 50 MiB scan limit."}
+                raise ValidationError("PII scan input exceeds the 50 MiB scan limit.")
             df = pd.read_csv(io.BytesIO(raw_data))
             report_columns = []
             for column in df.columns:
