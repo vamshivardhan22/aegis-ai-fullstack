@@ -267,7 +267,7 @@ async def _publish_candidate(
             source_type="transformed",
             silver_path=candidate_path,
             schema_json=checkpoint.get("output_schema"),
-            profile_json=checkpoint.get("profile"),
+            profile_json={**(checkpoint.get("profile") or {}), "output_sha256": checkpoint.get("output_sha256")},
             row_count=checkpoint.get("output_row_count"),
             column_count=checkpoint.get("output_column_count"),
             size_bytes=len(output_bytes),
