@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.agents.base import BaseAgent
 from src.config import get_settings
 from src.core.logging import configure_logging
-from src.database.models import Document
+from src.database.models import Document, Pipeline
 from src.database.repository import DocumentRepository
 
 logger = configure_logging(get_settings().AEGIS_DEBUG)
@@ -156,6 +156,7 @@ class RAGKnowledgeAgent(BaseAgent):
 
         embedding = await self._embed_text(context["content"])
         document_id = context.get("document_id", "")
+        metadata = dict(context.get("metadata", {}))
         if isinstance(self.db_repo, AsyncSession):
             document = await DocumentRepository(self.db_repo).create(
                 Document(
@@ -163,7 +164,7 @@ class RAGKnowledgeAgent(BaseAgent):
                     title=context.get("title") or context["doc_type"],
                     content=context["content"],
                     embedding_vector={"model": get_settings().AEGIS_EMBEDDING_MODEL, "vector": embedding},
-                    metadata_json=context.get("metadata", {}),
+                    metadata_json=metadata,
                     source_url=context.get("source_url"),
                 )
             )
@@ -173,7 +174,13 @@ class RAGKnowledgeAgent(BaseAgent):
         await self.vector_store.upsert(
             document_id,
             embedding,
-            {"document_id": document_id, "doc_type": context["doc_type"], "title": context.get("title") or context["doc_type"]},
+            {
+                "document_id": document_id,
+                "doc_type": context["doc_type"],
+                "title": context.get("title") or context["doc_type"],
+                "project_id": metadata.get("project_id"),
+                "visibility": metadata.get("visibility", "private"),
+            },
         )
         await self.log_decision("KNOWLEDGE_INGESTED", f"Ingested {context['doc_type']} knowledge", 0.9)
         return {"document_id": document_id, "embedding_dimension": len(embedding), "collection": get_settings().AEGIS_QDRANT_COLLECTION}
@@ -191,11 +198,12 @@ class RAGKnowledgeAgent(BaseAgent):
                 doc_id = hit.get("payload", {}).get("document_id")
                 if doc_id:
                     document = await repo.get_by_id(doc_id)
-                    if document is not None:
+                    if document is not None and self._document_visible(document, context):
                         documents.append(document)
                         scores[document.id] = float(hit.get("score", 0.0))
             if not documents:
-                documents = list(await repo.search_content(context["question"], limit=5))
+                candidates = list(await repo.search_content(context["question"], limit=20))
+                documents = [document for document in candidates if self._document_visible(document, context)][:5]
         context_text = "\n\n".join(f"[{doc.doc_type}] {doc.title or ''}: {doc.content}" for doc in documents)
         prompt = f"Based on this context: {context_text}, answer: {context['question']}"
         try:
@@ -209,6 +217,15 @@ class RAGKnowledgeAgent(BaseAgent):
         ]
         confidence = max([source["score"] for source in sources], default=0.5)
         return {"answer": answer, "sources": sources, "confidence": float(confidence)}
+
+    @staticmethod
+    def _document_visible(document: Document, context: dict[str, Any]) -> bool:
+        """Expose only explicitly public knowledge or documents scoped to the requested project."""
+        metadata = document.metadata_json or {}
+        if metadata.get("visibility") == "public":
+            return True
+        project_id = context.get("project_id")
+        return bool(project_id and metadata.get("project_id") == project_id)
 
     async def _embed_text(self, text: str) -> list[float]:
         """Generate a 768-dimensional embedding, falling back only if Ollama is unavailable."""
@@ -239,12 +256,15 @@ async def ingest_pipeline_completion(session: AsyncSession, pipeline_id: str, pa
     """Auto-ingest completed pipeline context into the knowledge base."""
 
     agent = RAGKnowledgeAgent("rag", _NoopLLM(), session, None)
+    pipeline = await session.get(Pipeline, pipeline_id)
+    if pipeline is None:
+        return
     await agent.execute(
         {
             "action": "ingest",
             "doc_type": "pipeline_log",
             "content": str(payload),
-            "metadata": {"pipeline_id": pipeline_id, "event": "pipeline_completed"},
+            "metadata": {"pipeline_id": pipeline_id, "project_id": pipeline.project_id, "event": "pipeline_completed"},
             "title": f"Pipeline {pipeline_id} completion",
         }
     )
