@@ -24,12 +24,20 @@ class TransformAgent(BaseAgent):
     async def execute(self, context: dict[str, Any]) -> dict[str, Any]:
         """Transform a source CSV into a silver dataset."""
         try:
-            df = pd.read_csv(io.BytesIO(await self.storage.read(context["source_data_path"])))
+            source_bytes = await self.storage.read(context["source_data_path"])
+            if not source_bytes or len(source_bytes) > 50 * 1024 * 1024:
+                raise ValidationError("Source CSV is empty or exceeds the 50 MiB transformation limit")
+            df = pd.read_csv(io.BytesIO(source_bytes))
+            if df.empty or len(df.columns) == 0 or len(df.columns) > 500 or df.columns.duplicated().any():
+                raise ValidationError("Source CSV must contain rows and unique columns, with at most 500 columns")
+            output_name = str(context.get("output_name", "")).strip()
+            if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,99}", output_name) or ".." in output_name:
+                raise ValidationError("output_name must be a safe identifier of at most 100 characters")
             schema = self._schema_for_prompt(df)
             generated = await self._generate_transformation(context, schema)
             plan = generated["plan"]
             result = apply_transformation_plan(df, plan)
-            key = "silver/" + str(context["output_name"]) + ".csv"
+            key = f"silver/{context.get('project_id', 'unassigned')}/{output_name}.csv"
             await self.store_artifact(key, result.to_csv(index=False).encode(), "text/csv")
             dataset_id = ""
             lineage_id = ""
