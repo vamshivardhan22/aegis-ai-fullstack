@@ -30,7 +30,7 @@ def _to_async_url(url: str) -> str:
 def _to_sync_url(url: str) -> str:
     """Strip async SQLAlchemy driver fragments for sync usage."""
 
-    return url.replace("+aiosqlite", "").replace("+asyncpg", "")
+    return url.replace("+aiosqlite", "").replace("postgresql+asyncpg://", "postgresql+psycopg://")
 
 
 def _engine_kwargs(url: str) -> dict[str, Any]:

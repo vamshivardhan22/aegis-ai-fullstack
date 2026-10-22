@@ -1,4 +1,4 @@
-import { BarChart3, Bot, GitBranch, LayoutDashboard, MessageSquare, PauseCircle, Shield, Upload, Users } from "lucide-react";
+import { BarChart3, Bot, GitBranch, LayoutDashboard, MessageSquare, PauseCircle, Shield, Upload, Users, BrainCircuit } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { NavLink } from "react-router-dom";
 import { cn } from "../lib/utils.js";
@@ -7,7 +7,7 @@ import api from "../lib/api.js";
 
 const sections = [
   { title: "Overview", items: [{ label: "Dashboard", path: "/", icon: LayoutDashboard }, { label: "Pipelines", path: "/pipelines", icon: GitBranch }, { label: "Agents", path: "/agents", icon: Bot }] },
-  { title: "Intelligence", items: [{ label: "Chat", path: "/chat", icon: MessageSquare }, { label: "Lineage", path: "/lineage", icon: GitBranch }] },
+  { title: "Intelligence", items: [{ label: "Chat", path: "/chat", icon: MessageSquare }, { label: "Lineage", path: "/lineage", icon: GitBranch }, { label: "Models", path: "/models", icon: BrainCircuit }] },
   { title: "Operations", items: [{ label: "Approvals", path: "/approvals", icon: PauseCircle, badgeKey: "approvals" }, { label: "Monitoring", path: "/monitoring", icon: BarChart3 }, { label: "Upload", path: "/upload", icon: Upload }] }
 ];
 

@@ -41,8 +41,24 @@ Unauthorized responses use `{"detail":"...","code":"UNAUTHORIZED"}`. Forbidden r
 }
 ```
 
-The response includes dataset ID, project ID, name, and bronze path. `POST /datasets/upload` accepts multipart files for larger CSV data. `GET /datasets/{dataset_id}` returns metadata for authenticated users.
+The response includes dataset ID, project ID, Bronze path, row/column counts, schema, checksum, null counts, and duplicate-row profile. CSV input is capped at 10 MiB and dataset names are validated. `POST /datasets/upload` accepts multipart CSV files. `GET /datasets/` lists datasets only in projects the caller can access; `GET /datasets/{dataset_id}` returns metadata only to an authorized project user. Unauthorized cross-project IDs return 404.
 
+## Pipeline Endpoints
+
+- `GET /pipelines/`: list pipeline runs in projects visible to the authenticated user.
+- `POST /pipelines/`: execute the governed CSV workflow for an authorized dataset. Example body:
+
+```json
+{"dataset_id":"DATASET_ID","name":"Orders validation","config":{"required_columns":["order_id","amount"],"minimum_quality_score":0.6}}
+```
+
+The workflow validates and profiles the source, applies the allow-listed transformation plan, masks detected PII, writes a staged artifact, and records a checksum. Runs containing detected sensitive fields pause at `approval_required`; the output is not published until an authorized approval. Non-sensitive passing runs publish a derived dataset and lineage edge. The first release supports CSV only, up to 50 MiB for pipeline execution; the upload API itself is limited to 10 MiB.
+
+- `GET /pipelines/{pipeline_id}`: fetch a scoped run record and checkpoint metadata.
+- `POST /pipelines/{pipeline_id}/resume`: retry a failed run or publish an approved checkpoint.
+- `GET /approvals/pending`: list approvals in projects visible to the caller.
+- `GET /chat/history`: return the caller's last 50 persisted chat turns; pass `project_id` to filter to one authorized project.
+- `POST /approvals/{pipeline_id}/approve` and `POST /approvals/{pipeline_id}/reject`: persist a decision and audit record. Rejection never publishes the staged artifact.
 ## Agent Endpoints
 
 `GET /agents/` lists available agents. `GET /agents/{agent_type}/status` returns availability. `POST /agents/{agent_type}/execute` runs an agent and requires admin or data engineer privileges. Supported agent types include ingestion, schema, cleaning, features, ml, explain, deploy, monitor, drift, transform, rag-related direct use through chat, and pii. Example PII scan:
@@ -75,3 +91,10 @@ Lineage endpoints require authentication. `/lineage/datasets/{dataset_id}` retur
 Production clients should use idempotent names or external request identifiers when repeatedly creating datasets from automation. Dataset upload responses include stable IDs that should be stored by the caller and reused for downstream agent, lineage, and chat requests. Agent execution responses are intentionally plain JSON, so workflow systems can inspect result keys without parsing logs. Long-running production agents can later be moved behind queues while keeping the same request and response contracts.
 
 For browser or CLI applications, the recommended flow is: register or provision a user, log in, cache the bearer token until expiry, refresh before long workflows, upload data, execute the relevant agent, then query lineage or chat for human-readable interpretation. Administrative clients should page audit logs and export them to the organization’s security information and event management system. Monitoring clients should prefer `/health` for availability and Prometheus scraping for time-series behavior.
+
+
+## Model Registry
+
+- `GET /models/`: list trained model metadata and evaluation metrics for projects the caller can access.
+- `GET /models/{model_id}`: fetch one model record after project authorization.
+- `GET /models/{model_id}/download`: download the registered joblib artifact with an SHA-256 response header. The API does not deserialize downloaded artifacts.

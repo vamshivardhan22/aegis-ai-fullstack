@@ -5,7 +5,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.agents.compat import CompatibilityAgent
+from src.agents.dataops import DatasetOperationAgent
 from src.agents.deploy import DeployAgent
 from src.agents.drift import DriftAgent
 from src.agents.explain import ExplainAgent
@@ -14,6 +14,7 @@ from src.agents.pii import PIIDetectionAgent
 from src.agents.transform import TransformAgent
 from src.core.exceptions import AgentError, HumanApprovalRequired
 from src.core.security import get_current_user, require_role
+from src.core.tenancy import require_dataset_access, require_dataset_path_access
 from src.database.models import User, UserRole
 from src.database.session import get_async_session
 from src.llm.client import LLMClient
@@ -22,12 +23,12 @@ from src.storage import get_storage
 router = APIRouter()
 
 AGENT_TYPES = {
-    "ingestion": CompatibilityAgent,
-    "schema": CompatibilityAgent,
-    "quality": CompatibilityAgent,
-    "cleaning": CompatibilityAgent,
-    "features": CompatibilityAgent,
-    "ml": CompatibilityAgent,
+    "ingestion": DatasetOperationAgent,
+    "schema": DatasetOperationAgent,
+    "quality": DatasetOperationAgent,
+    "cleaning": DatasetOperationAgent,
+    "features": DatasetOperationAgent,
+    "ml": DatasetOperationAgent,
     "explain": ExplainAgent,
     "deploy": DeployAgent,
     "monitor": MonitorAgent,
@@ -73,6 +74,25 @@ async def execute_agent(
     if agent_type not in AGENT_TYPES:
         raise HTTPException(status_code=404, detail={"error": "Unknown agent type"})
     context = await request.json()
+    if not isinstance(context, dict):
+        raise HTTPException(status_code=422, detail="Agent context must be a JSON object")
+    dataset_id = context.get("dataset_id") or context.get("source_dataset_id")
+    path_fields = ("data_sample_path", "source_data_path", "artifact")
+    supplied_paths = [context[field] for field in path_fields if context.get(field)]
+    if agent_type in {"ingestion", "schema", "quality", "cleaning", "features", "ml", "pii", "transform"} and not dataset_id:
+        raise HTTPException(status_code=422, detail="This agent requires an authorized dataset_id")
+    if supplied_paths and not dataset_id:
+        raise HTTPException(status_code=404, detail="Dataset artifact not found")
+    if dataset_id:
+        dataset_id = str(dataset_id)
+        context["dataset_id"] = dataset_id
+        if agent_type == "transform":
+            context.setdefault("source_dataset_id", dataset_id)
+        dataset = await require_dataset_access(session, current_user, dataset_id)
+        if context.get("project_id") and context["project_id"] != dataset.project_id:
+            raise HTTPException(status_code=404, detail="Dataset not found")
+        for artifact_path in supplied_paths:
+            await require_dataset_path_access(session, current_user, str(dataset_id), str(artifact_path))
     llm_client = get_llm_client()
     try:
         agent = AGENT_TYPES[agent_type](agent_type, llm_client, session, get_storage())

@@ -7,7 +7,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from src.api.routers import admin, agents, approval, auth, chat, datasets, lineage, pipelines
+from src.api.routers import admin, agents, approval, auth, chat, datasets, lineage, models, pipelines
 from src.api.routers.health import router as health_router
 from src.config import get_settings
 from src.core.exceptions import ValidationError
@@ -54,6 +54,7 @@ app.include_router(admin.router, prefix="/admin", tags=["admin"])
 app.include_router(lineage.router, prefix="/lineage", tags=["lineage"])
 app.include_router(datasets.router, prefix="/datasets", tags=["datasets"])
 app.include_router(pipelines.router, prefix="/pipelines", tags=["pipelines"])
+app.include_router(models.router, prefix="/models", tags=["models"])
 
 
 @app.exception_handler(ValidationError)

@@ -3,7 +3,7 @@
 from functools import lru_cache
 from typing import Literal, Optional
 
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -35,7 +35,6 @@ class Settings(BaseSettings):
     AEGIS_LLM_MODEL: str = "gpt-4o-mini"
     AEGIS_LLM_TEMPERATURE: float = 0.2
     AEGIS_LLM_TIMEOUT: int = 120
-    AEGIS_OLLAMA_URL: str = "http://localhost:11434"
     AEGIS_OPENAI_API_KEY: Optional[str] = None
     AEGIS_ANTHROPIC_API_KEY: Optional[str] = None
     AEGIS_GOOGLE_API_KEY: Optional[str] = None
@@ -59,6 +58,52 @@ class Settings(BaseSettings):
     AEGIS_MAX_RETRIES: int = 3
     AEGIS_RETRY_DELAY_SECONDS: int = 5
     AEGIS_HUMAN_APPROVAL_RISK_THRESHOLD: float = 0.7
+
+    @model_validator(mode="after")
+    def validate_production_security(self) -> "Settings":
+        """Refuse insecure or ephemeral defaults when explicitly running in production."""
+        if self.AEGIS_ENV != "production":
+            return self
+        problems: list[str] = []
+        if "change-me" in self.AEGIS_SECRET_KEY.lower() or "replace" in self.AEGIS_SECRET_KEY.lower() or len(self.AEGIS_SECRET_KEY) < 32:
+            problems.append("AEGIS_SECRET_KEY must be a unique secret of at least 32 characters")
+        if self.AEGIS_DEBUG:
+            problems.append("AEGIS_DEBUG must be false in production")
+        if not self.is_postgres:
+            problems.append("AEGIS_DB_URL must use PostgreSQL in production")
+        if self.AEGIS_STORAGE_BACKEND == "local":
+            problems.append("AEGIS_STORAGE_BACKEND must use durable shared storage in production")
+        if self.AEGIS_STORAGE_BACKEND == "supabase" and (
+            not self.AEGIS_SUPABASE_URL
+            or not self.AEGIS_SUPABASE_SERVICE_ROLE_KEY
+            or self.AEGIS_SUPABASE_SERVICE_ROLE_KEY.lower().startswith(("replace", "your_", "changeme"))
+        ):
+            problems.append("Real Supabase URL and service-role key are required for production storage")
+        if self.AEGIS_STORAGE_BACKEND == "minio" and (
+            self.AEGIS_MINIO_ACCESS_KEY.lower().startswith(("replace", "your_", "minioadmin"))
+            or self.AEGIS_MINIO_SECRET_KEY.lower().startswith(("replace", "your_", "minioadmin"))
+        ):
+            problems.append("Default or placeholder MinIO credentials are forbidden in production")
+        provider_key = {
+            "openai": self.AEGIS_OPENAI_API_KEY,
+            "anthropic": self.AEGIS_ANTHROPIC_API_KEY,
+            "google": self.AEGIS_GOOGLE_API_KEY,
+        }.get(self.AEGIS_LLM_PROVIDER)
+        if not provider_key or provider_key.lower().startswith(("replace", "your_", "changeme")):
+            problems.append(f"A real API key is required for configured LLM provider: {self.AEGIS_LLM_PROVIDER}")
+        if "aegis_secret" in self.AEGIS_DB_URL.lower():
+            problems.append("Default database password must be replaced in production")
+        if self.AEGIS_EMBEDDING_PROVIDER == "openai" and (not self.AEGIS_OPENAI_API_KEY or self.AEGIS_OPENAI_API_KEY.lower().startswith(("replace", "your_", "changeme"))):
+            problems.append("AEGIS_OPENAI_API_KEY is required for the configured embedding provider")
+        if self.AEGIS_CORS_ORIGIN_REGEX:
+            problems.append("AEGIS_CORS_ORIGIN_REGEX must be unset in production")
+        if any("localhost" in origin or "127.0.0.1" in origin for origin in self.cors_origins):
+            problems.append("AEGIS_CORS_ORIGINS must not include localhost in production")
+        if any("your-domain" in origin or ".example" in origin for origin in self.cors_origins):
+            problems.append("AEGIS_CORS_ORIGINS must use the actual deployed frontend domain")
+        if problems:
+            raise ValueError("Unsafe production configuration: " + "; ".join(problems))
+        return self
 
     @property
     def is_postgres(self) -> bool:
