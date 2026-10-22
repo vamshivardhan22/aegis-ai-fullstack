@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.agents.base import BaseAgent
 from src.config import get_settings
 from src.core.logging import configure_logging
-from src.database.models import Document
+from src.database.models import Document, Pipeline
 from src.database.repository import DocumentRepository
 
 logger = configure_logging(get_settings().AEGIS_DEBUG)
@@ -41,6 +41,8 @@ class AsyncVectorStore:
         """Ensure the vector collection exists."""
 
         if self.client is None:
+            if self.settings.AEGIS_ENV == "production":
+                raise RuntimeError("Qdrant is required in production; in-memory vector storage is not durable")
             _MEMORY_COLLECTIONS.setdefault(self.collection_name, [])
             return
         try:
@@ -54,6 +56,8 @@ class AsyncVectorStore:
                     vectors_config=VectorParams(size=self.vector_size, distance=Distance.COSINE),
                 )
         except Exception as exc:
+            if self.settings.AEGIS_ENV == "production":
+                raise RuntimeError("Qdrant collection initialization failed") from exc
             logger.warning("qdrant_collection_fallback", error=str(exc))
             self.client = None
             _MEMORY_COLLECTIONS.setdefault(self.collection_name, [])
@@ -75,6 +79,8 @@ class AsyncVectorStore:
                 points=[PointStruct(id=point_id, vector=vector, payload=payload)],
             )
         except Exception as exc:
+            if self.settings.AEGIS_ENV == "production":
+                raise RuntimeError("Qdrant upsert failed; refusing non-durable fallback") from exc
             logger.warning("qdrant_upsert_fallback", error=str(exc))
             self.client = None
             await self.upsert(point_id, vector, payload)
@@ -98,6 +104,8 @@ class AsyncVectorStore:
             hits = await self.client.search(collection_name=self.collection_name, query_vector=vector, limit=limit)
             return [{"id": str(hit.id), "score": float(hit.score), "payload": hit.payload or {}} for hit in hits]
         except Exception as exc:
+            if self.settings.AEGIS_ENV == "production":
+                raise RuntimeError("Qdrant search failed; refusing non-durable fallback") from exc
             logger.warning("qdrant_search_fallback", error=str(exc))
             self.client = None
             return await self.search(vector, limit)
@@ -112,6 +120,8 @@ class AsyncVectorStore:
             collections = await self.client.get_collections()
             return any(collection.name == self.collection_name for collection in collections.collections)
         except Exception as exc:
+            if self.settings.AEGIS_ENV == "production":
+                raise RuntimeError("Qdrant health check failed") from exc
             logger.warning("qdrant_exists_fallback", error=str(exc))
             self.client = None
             return await self.collection_exists()
@@ -156,6 +166,7 @@ class RAGKnowledgeAgent(BaseAgent):
 
         embedding = await self._embed_text(context["content"])
         document_id = context.get("document_id", "")
+        metadata = dict(context.get("metadata", {}))
         if isinstance(self.db_repo, AsyncSession):
             document = await DocumentRepository(self.db_repo).create(
                 Document(
@@ -163,7 +174,7 @@ class RAGKnowledgeAgent(BaseAgent):
                     title=context.get("title") or context["doc_type"],
                     content=context["content"],
                     embedding_vector={"model": get_settings().AEGIS_EMBEDDING_MODEL, "vector": embedding},
-                    metadata_json=context.get("metadata", {}),
+                    metadata_json=metadata,
                     source_url=context.get("source_url"),
                 )
             )
@@ -173,7 +184,13 @@ class RAGKnowledgeAgent(BaseAgent):
         await self.vector_store.upsert(
             document_id,
             embedding,
-            {"document_id": document_id, "doc_type": context["doc_type"], "title": context.get("title") or context["doc_type"]},
+            {
+                "document_id": document_id,
+                "doc_type": context["doc_type"],
+                "title": context.get("title") or context["doc_type"],
+                "project_id": metadata.get("project_id"),
+                "visibility": metadata.get("visibility", "private"),
+            },
         )
         await self.log_decision("KNOWLEDGE_INGESTED", f"Ingested {context['doc_type']} knowledge", 0.9)
         return {"document_id": document_id, "embedding_dimension": len(embedding), "collection": get_settings().AEGIS_QDRANT_COLLECTION}
@@ -191,11 +208,12 @@ class RAGKnowledgeAgent(BaseAgent):
                 doc_id = hit.get("payload", {}).get("document_id")
                 if doc_id:
                     document = await repo.get_by_id(doc_id)
-                    if document is not None:
+                    if document is not None and self._document_visible(document, context):
                         documents.append(document)
                         scores[document.id] = float(hit.get("score", 0.0))
             if not documents:
-                documents = list(await repo.search_content(context["question"], limit=5))
+                candidates = list(await repo.search_content(context["question"], limit=20))
+                documents = [document for document in candidates if self._document_visible(document, context)][:5]
         context_text = "\n\n".join(f"[{doc.doc_type}] {doc.title or ''}: {doc.content}" for doc in documents)
         prompt = f"Based on this context: {context_text}, answer: {context['question']}"
         try:
@@ -210,17 +228,26 @@ class RAGKnowledgeAgent(BaseAgent):
         confidence = max([source["score"] for source in sources], default=0.5)
         return {"answer": answer, "sources": sources, "confidence": float(confidence)}
 
+    @staticmethod
+    def _document_visible(document: Document, context: dict[str, Any]) -> bool:
+        """Expose only explicitly public knowledge or documents scoped to the requested project."""
+        metadata = document.metadata_json or {}
+        if metadata.get("visibility") == "public":
+            return True
+        project_id = context.get("project_id")
+        return bool(project_id and metadata.get("project_id") == project_id)
+
     async def _embed_text(self, text: str) -> list[float]:
         """Generate a 768-dimensional embedding, falling back only if Ollama is unavailable."""
 
         try:
             embedding = await self.llm.embed(text, model=get_settings().AEGIS_EMBEDDING_MODEL)
-            if len(embedding) == VECTOR_SIZE:
-                return embedding
-            if len(embedding) > VECTOR_SIZE:
-                return embedding[:VECTOR_SIZE]
-            return embedding + [0.0] * (VECTOR_SIZE - len(embedding))
+            if len(embedding) != VECTOR_SIZE:
+                raise ValueError(f"Expected {VECTOR_SIZE}-dimensional embedding, received {len(embedding)}")
+            return embedding
         except Exception as exc:
+            if get_settings().AEGIS_ENV == "production":
+                raise RuntimeError("Embedding provider failed; refusing synthetic embeddings in production") from exc
             logger.warning("embedding_fallback", error=str(exc))
             return self._deterministic_embedding(text)
 
@@ -239,12 +266,15 @@ async def ingest_pipeline_completion(session: AsyncSession, pipeline_id: str, pa
     """Auto-ingest completed pipeline context into the knowledge base."""
 
     agent = RAGKnowledgeAgent("rag", _NoopLLM(), session, None)
+    pipeline = await session.get(Pipeline, pipeline_id)
+    if pipeline is None:
+        return
     await agent.execute(
         {
             "action": "ingest",
             "doc_type": "pipeline_log",
             "content": str(payload),
-            "metadata": {"pipeline_id": pipeline_id, "event": "pipeline_completed"},
+            "metadata": {"pipeline_id": pipeline_id, "project_id": pipeline.project_id, "event": "pipeline_completed"},
             "title": f"Pipeline {pipeline_id} completion",
         }
     )
@@ -268,13 +298,16 @@ async def ingest_alert(session: AsyncSession, alert_payload: dict[str, Any]) -> 
 async def ingest_human_decision(session: AsyncSession, pipeline_id: str, decision: dict[str, Any]) -> None:
     """Auto-ingest human approval or rejection decisions."""
 
+    pipeline = await session.get(Pipeline, pipeline_id)
+    if pipeline is None:
+        return
     agent = RAGKnowledgeAgent("rag", _NoopLLM(), session, None)
     await agent.execute(
         {
             "action": "ingest",
             "doc_type": "manual",
             "content": str(decision),
-            "metadata": {"pipeline_id": pipeline_id, "event": "human_decision"},
+            "metadata": {"pipeline_id": pipeline_id, "project_id": pipeline.project_id, "event": "human_decision"},
             "title": f"Human decision for {pipeline_id}",
         }
     )
