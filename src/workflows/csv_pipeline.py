@@ -61,6 +61,8 @@ class CSVWorkflowState(TypedDict, total=False):
     human_decisions: dict[str, Any]
     result: dict[str, Any]
     error_message: str
+    config: dict[str, Any]
+    masking_applied: bool
 
 
 def _detect_pii(frame: pd.DataFrame) -> dict[str, str]:
@@ -235,6 +237,8 @@ async def _profile_node(state: CSVWorkflowState) -> CSVWorkflowState:
 
 async def _transform_node(state: CSVWorkflowState) -> CSVWorkflowState:
     raw = await get_storage().read(state["source_path"])
+    if hashlib.sha256(raw).hexdigest() != state.get("source_sha256"):
+        raise ValueError("Source artifact changed after profiling; transformation blocked")
     frame = pd.read_csv(io.BytesIO(raw))
     pii_columns = _detect_pii(frame)
     masked = frame.copy(deep=True)
