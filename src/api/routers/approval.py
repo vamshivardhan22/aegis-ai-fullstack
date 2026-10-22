@@ -36,7 +36,10 @@ async def pending_approvals(
 ) -> dict[str, list[dict[str, Any]]]:
     """List pipelines waiting for human approval."""
 
-    query = select(Pipeline).join(Project, Project.id == Pipeline.project_id).where(Pipeline.status == PipelineStatus.APPROVAL_REQUIRED)\n    if current_user.role != UserRole.ADMIN:\n        query = query.where(Project.owner_id == current_user.id)\n    result = await session.execute(query)
+    query = select(Pipeline).join(Project, Project.id == Pipeline.project_id).where(Pipeline.status == PipelineStatus.APPROVAL_REQUIRED)
+    if current_user.role != UserRole.ADMIN:
+        query = query.where(Project.owner_id == current_user.id)
+    result = await session.execute(query)
     pipelines = result.scalars().all()
     return {
         "pipelines": [
@@ -63,7 +66,8 @@ async def approval_detail(
     pipeline = await PipelineRepository(session).get_by_id(pipeline_id)
     if pipeline is None:
         raise HTTPException(status_code=404, detail={"error": "Pipeline not found"})
-    await require_project_access(session, current_user, pipeline.project_id)\n    checkpoint = pipeline.checkpoint_data or {}
+    await require_project_access(session, current_user, pipeline.project_id)
+    checkpoint = pipeline.checkpoint_data or {}
     return {
         "pipeline_id": pipeline.id,
         "status": pipeline.status.value,
