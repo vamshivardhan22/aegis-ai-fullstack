@@ -137,7 +137,7 @@ class PIIDetectionAgent(BaseAgent):
                     agent_id=self.name,
                     config_json={"pii_columns": pii_columns, "source_sha256": masked_profile["source_sha256"]},
                 ))
-            if report_columns and isinstance(self.db_repo, AsyncSession):
+            if report_columns and source_dataset is not None and isinstance(self.db_repo, AsyncSession):
                 await AlertRepository(self.db_repo).create(
                     Alert(
                         metric_name="pii_detected_without_policy",
