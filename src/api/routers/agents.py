@@ -87,8 +87,20 @@ async def execute_agent(
         dataset = await require_dataset_access(session, current_user, str(dataset_id))
         if context.get("project_id") and context["project_id"] != dataset.project_id:
             raise HTTPException(status_code=404, detail="Dataset not found")
+        if context.get("source_dataset_id") and str(context["source_dataset_id"]) != dataset.id:
+            raise HTTPException(status_code=404, detail="Dataset not found")
         for artifact_path in supplied_paths:
             await require_dataset_path_access(session, current_user, str(dataset_id), str(artifact_path))
+        context["dataset_id"] = dataset.id
+        if agent_type == "transform":
+            context["source_dataset_id"] = dataset.id
+            context.setdefault("source_data_path", dataset.bronze_path or dataset.silver_path or dataset.gold_path)
+            if not context.get("source_data_path"):
+                raise HTTPException(status_code=422, detail="Dataset has no readable source artifact")
+        if agent_type == "pii":
+            context.setdefault("data_sample_path", dataset.bronze_path or dataset.silver_path or dataset.gold_path)
+            if not context.get("data_sample_path"):
+                raise HTTPException(status_code=422, detail="Dataset has no readable source artifact")
     llm_client = get_llm_client()
     try:
         agent = AGENT_TYPES[agent_type](agent_type, llm_client, session, get_storage())
