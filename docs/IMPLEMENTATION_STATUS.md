@@ -7,7 +7,7 @@ This file distinguishes code changes present on the upgrade branch from work tha
 - Replaced arbitrary Python execution in `TransformAgent` with an allow-listed declarative transformation engine.
 - Added project/dataset authorization helpers and applied them to dataset reads/writes, agent artifact access, lineage traversal/recording, chat facts, approval listing/actions, and pipeline access.
 - Added bounded CSV upload, schema/type profiling, row/column/null/duplicate metrics, source checksum, safe dataset names, and a 10 MiB upload limit.
-- Added a LangGraph CSV workflow with database-persisted stage checkpoints, schema/required-column validation, configurable quality threshold, sensitive-column detection/masking, validated transformations, staged artifact checksums, approval gating, derived dataset publication, audit events, and lineage.
+- Added a LangGraph CSV workflow with database-persisted stage checkpoints, schema/required-column validation, configurable quality threshold, sensitive-column detection/masking, validated transformations, staged artifact checksums, approval gating, derived dataset publication, audit events, and lineage.\n- Replaced standalone ingestion/schema/quality/cleaning/features/ML compatibility responses with real profiling, schema checks, quality metrics, allow-listed cleaning/features, and evaluated Random Forest training with model artifact registration.\n- Added persistent per-user chat history and authorized dataset artifact download endpoints.
 - Added explicit approval/rejection state checks and prevented unsupported approval-time modifications from silently changing data.
 - Switched `LLMClient` to configured LangChain OpenAI/Anthropic/Google integrations and OpenAI embeddings with a fixed 768-dimensional Qdrant vector.
 - Made Qdrant and embedding failures fail closed in production instead of silently switching to ephemeral vectors.
@@ -26,7 +26,7 @@ This file distinguishes code changes present on the upgrade branch from work tha
 | 2. Real data engine | First CSV vertical slice implemented | Add row-level reject reports, configurable duplicate-key policies, schema drift contracts, larger-file memory benchmarks, and more data-format adapters. |
 | 3. Governance | Partial | Expand PII categories and validate against labeled data; define organization policy, retention, tokenization and masking rules; test that all publish paths enforce policy. |
 | 4. Orchestration/recovery | Partial | Checkpoints persist in the pipeline record and approved publication can resume. Add a worker queue, cancellation, bounded retries, concurrency/idempotency tests, and automatic recovery after process restart. |
-| 5. UI integration | Partial | Pipeline, upload, and approval flows are API-backed. Replace/verify remaining dashboard, agent, monitoring, and chat demo surfaces; persist chat history if promised. |
+| 5. UI integration | Partial | Pipeline, upload, and approval flows are API-backed. Replace/verify remaining dashboard, monitoring, and chat UI demo surfaces; connect model/artifact details and add user-visible cancellation/recovery. |
 | 6. Release evidence | Not verified | Run Ruff, MyPy, unit tests, E2E/security tests, frontend build, migration tests, Docker build, and load/fault tests; record actual results. |
 
 ## First workflow acceptance contract
