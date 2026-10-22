@@ -274,7 +274,7 @@ class DatasetOperationAgent(BaseAgent):
             parameters_json={"features": features, "target": target, "test_size": float(test_size), "random_state": 42},
             artifact_path=artifact_path,
             status=ModelStatus.STAGING,
-            is_active=True,
+            is_active=False,
         ))
         await self.log_decision("MODEL_TRAINED", f"Trained {task} model {model_record.id}", 1.0)
         return {
