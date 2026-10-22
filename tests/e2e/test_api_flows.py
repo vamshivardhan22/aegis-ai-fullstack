@@ -213,6 +213,12 @@ async def test_ml_agent_trains_and_registers_a_model(client: AsyncClient) -> Non
     assert result["algorithm"] == "RandomForestClassifier"
     assert 0 <= result["metrics"]["accuracy"] <= 1
     assert result["artifact_path"].endswith(".joblib")
+    registry = await client.get("/models/", headers=headers)
+    assert registry.status_code == 200
+    assert any(model["id"] == result["model_id"] for model in registry.json()["models"])
+    artifact = await client.get(f"/models/{result['model_id']}/download", headers=headers)
+    assert artifact.status_code == 200
+    assert len(artifact.content) > 100
 
 
 @pytest.mark.asyncio
