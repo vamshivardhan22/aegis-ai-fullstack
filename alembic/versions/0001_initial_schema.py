@@ -17,10 +17,10 @@ depends_on = None
 def upgrade() -> None:
     """Create the initial metadata schema."""
     bind = op.get_bind()
-    Base.metadata.create_all(bind=bind)
+    tables = [table for table in Base.metadata.sorted_tables if table.name != "chat_messages"]\n    Base.metadata.create_all(bind=bind, tables=tables)
 
 
 def downgrade() -> None:
     """Drop the initial metadata schema."""
     bind = op.get_bind()
-    Base.metadata.drop_all(bind=bind)
+    tables = [table for table in reversed(Base.metadata.sorted_tables) if table.name != "chat_messages"]\n    Base.metadata.drop_all(bind=bind, tables=tables)
