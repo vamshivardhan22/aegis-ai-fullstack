@@ -57,7 +57,9 @@ class PIIDetectionAgent(BaseAgent):
             source_dataset = None
             if isinstance(self.db_repo, AsyncSession):
                 source_dataset = await DatasetRepository(self.db_repo).get_by_id(dataset_id)
-                if source_dataset is None or artifact_path not in {
+                if source_dataset is None and context.get("apply_masking") is True:
+                    raise ValidationError("A real source dataset is required before publishing masked output")
+                if source_dataset is not None and artifact_path not in {
                     source_dataset.bronze_path, source_dataset.silver_path, source_dataset.gold_path
                 }:
                     raise ValidationError("Dataset artifact is not accessible")
