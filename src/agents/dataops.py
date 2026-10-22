@@ -156,7 +156,7 @@ class DatasetOperationAgent(BaseAgent):
         task = context.get("task")
         if not isinstance(target, str) or target not in frame.columns:
             raise ValidationError("ML execution requires a valid target_column")
-        if task not in {"classification", "regression"}:
+        if not isinstance(task, str) or task not in {"classification", "regression"}:
             raise ValidationError("task must be classification or regression")
         pii_columns = _detect_pii(frame)
         if target in pii_columns:
@@ -253,6 +253,8 @@ class DatasetOperationAgent(BaseAgent):
         artifact_path = f"models/{dataset.project_id}/{uuid4().hex}.joblib"
         await self.storage.write(artifact_path, artifact_bytes, "application/octet-stream")
         pipeline_id = context.get("pipeline_id")
+        if pipeline_id is not None and not isinstance(pipeline_id, str):
+            raise ValidationError("pipeline_id must be a string")
         if pipeline_id:
             pipeline = await self.db_repo.get(Pipeline, pipeline_id)
             if pipeline is None or pipeline.project_id != dataset.project_id:
