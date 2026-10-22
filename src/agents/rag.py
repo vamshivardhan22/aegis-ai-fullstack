@@ -86,30 +86,51 @@ class AsyncVectorStore:
             self.client = None
             await self.upsert(point_id, vector, payload)
 
-    async def search(self, vector: list[float], limit: int = 5) -> list[dict[str, Any]]:
-        """Search for nearest vectors."""
-
+    async def search(
+        self, vector: list[float], limit: int = 5, project_id: str | None = None
+    ) -> list[dict[str, Any]]:
+        """Search only public knowledge and, when supplied, knowledge in the requested project."""
         await self.ensure_collection()
+
+        def is_visible(payload: dict[str, Any]) -> bool:
+            if payload.get("visibility") == "public":
+                return True
+            return bool(project_id and payload.get("project_id") == project_id)
+
         if self.client is None:
             results = []
             for point in _MEMORY_COLLECTIONS.get(self.collection_name, []):
+                payload = point.get("payload", {})
+                if not is_visible(payload):
+                    continue
                 results.append(
                     {
                         "id": point["id"],
                         "score": self._cosine(vector, point["vector"]),
-                        "payload": point["payload"],
+                        "payload": payload,
                     }
                 )
             return sorted(results, key=lambda item: item["score"], reverse=True)[:limit]
         try:
-            hits = await self.client.search(collection_name=self.collection_name, query_vector=vector, limit=limit)
+            from qdrant_client.http.models import FieldCondition, Filter, MatchValue
+
+            should = [FieldCondition(key="visibility", match=MatchValue(value="public"))]
+            if project_id:
+                should.append(FieldCondition(key="project_id", match=MatchValue(value=project_id)))
+            query_filter = Filter(should=should)
+            hits = await self.client.search(
+                collection_name=self.collection_name,
+                query_vector=vector,
+                query_filter=query_filter,
+                limit=limit,
+            )
             return [{"id": str(hit.id), "score": float(hit.score), "payload": hit.payload or {}} for hit in hits]
         except Exception as exc:
             if self.settings.AEGIS_ENV == "production":
                 raise RuntimeError("Qdrant search failed; refusing non-durable fallback") from exc
             logger.warning("qdrant_search_fallback", error=str(exc))
             self.client = None
-            return await self.search(vector, limit)
+            return await self.search(vector, limit, project_id)
 
     async def collection_exists(self) -> bool:
         """Return whether the collection exists in the active store."""
@@ -200,7 +221,9 @@ class RAGKnowledgeAgent(BaseAgent):
         """Retrieve relevant documents and answer a natural-language question."""
 
         embedding = await self._embed_text(context["question"])
-        hits = await self.vector_store.search(embedding, limit=5)
+        hits = await self.vector_store.search(
+            embedding, limit=5, project_id=context.get("project_id")
+        )
         documents: list[Document] = []
         scores: dict[str, float] = {}
         if isinstance(self.db_repo, AsyncSession):
@@ -282,7 +305,18 @@ async def ingest_pipeline_completion(session: AsyncSession, pipeline_id: str, pa
 
 
 async def ingest_alert(session: AsyncSession, alert_payload: dict[str, Any]) -> None:
-    """Auto-ingest alert details into the knowledge base."""
+    """Auto-ingest alert details into the knowledge base with project scope when known."""
+
+    metadata: dict[str, Any] = {"event": "alert"}
+    project_id = alert_payload.get("project_id")
+    pipeline_id = alert_payload.get("pipeline_id")
+    if pipeline_id:
+        pipeline = await session.get(Pipeline, str(pipeline_id))
+        if pipeline is not None:
+            project_id = project_id or pipeline.project_id
+            metadata["pipeline_id"] = str(pipeline_id)
+    if project_id:
+        metadata["project_id"] = str(project_id)
 
     agent = RAGKnowledgeAgent("rag", LLMClient(), session, None)
     await agent.execute(
@@ -290,11 +324,10 @@ async def ingest_alert(session: AsyncSession, alert_payload: dict[str, Any]) -> 
             "action": "ingest",
             "doc_type": "incident",
             "content": str(alert_payload),
-            "metadata": {"event": "alert"},
+            "metadata": metadata,
             "title": "Monitoring alert",
         }
     )
-
 
 async def ingest_human_decision(session: AsyncSession, pipeline_id: str, decision: dict[str, Any]) -> None:
     """Auto-ingest human approval or rejection decisions."""
