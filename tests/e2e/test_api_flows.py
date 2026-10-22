@@ -4,7 +4,7 @@ import pytest
 from httpx import AsyncClient
 from sqlalchemy import select
 
-from src.database.models import AuditLog, Dataset, Pipeline, PipelineStatus, Project
+from src.database.models import AuditLog, Dataset, Model, Pipeline, PipelineStatus, Project
 from src.database.session import AsyncSessionLocal
 from src.storage import get_storage
 
@@ -200,3 +200,32 @@ async def test_non_sensitive_csv_pipeline_publishes_output(client: AsyncClient) 
     lineage = await client.get(f"/lineage/datasets/{dataset_id}", headers=headers)
     assert lineage.status_code == 200
     assert any(edge["target"] == output_id for edge in lineage.json()["edges"])
+
+@pytest.mark.asyncio
+async def test_ml_agent_trains_and_registers_a_baseline(client: AsyncClient) -> None:
+    """Training stores a model artifact and a queryable registry record."""
+    token = await _token(client, role="data_engineer")
+    headers = {"Authorization": f"Bearer {token}"}
+    rows = ["x,label"] + [f"{index},{index % 2}" for index in range(1, 31)]
+    created = await client.post(
+        "/datasets/",
+        headers=headers,
+        json={"name": "baseline_training", "content": "\\n".join(rows), "source_type": "csv"},
+    )
+    assert created.status_code == 200, created.text
+    response = await client.post(
+        "/agents/ml/execute",
+        headers=headers,
+        json={"dataset_id": created.json()["id"], "target_column": "label"},
+    )
+    assert response.status_code == 200, response.text
+    result = response.json()
+    assert result["status"] == "completed"
+    assert result["model_path"].endswith(".joblib")
+    assert result["metrics"]["accuracy"] >= 0
+    async with AsyncSessionLocal() as session:
+        record = await session.get(Model, result["model_id"])
+        assert record is not None
+        assert record.artifact_path == result["model_path"]
+        assert record.status.value == "staging"
+
