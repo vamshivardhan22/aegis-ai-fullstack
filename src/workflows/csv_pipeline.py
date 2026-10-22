@@ -46,6 +46,8 @@ class CSVWorkflowState(TypedDict, total=False):
     source_sha256: str
     input_schema: dict[str, str]
     profile: dict[str, Any]
+    output_profile: dict[str, Any]
+    output_quality_score: float
     pii_columns: dict[str, str]
     candidate_artifact: str
     output_schema: dict[str, str]
@@ -258,7 +260,17 @@ async def _transform_node(state: CSVWorkflowState) -> CSVWorkflowState:
     if not isinstance(plan, dict):
         raise ValueError("transformation_plan must be a declarative plan object")
     transformed = apply_transformation_plan(masked, plan)
+    if transformed.empty:
+        raise ValueError("Transformation produced zero rows; publication blocked")
     output_bytes = transformed.to_csv(index=False).encode("utf-8")
+    output_profile = _profile(transformed, output_bytes)
+    output_profile["source_sha256"] = state["source_sha256"]
+    output_profile["output_sha256"] = hashlib.sha256(output_bytes).hexdigest()
+    minimum_quality = float(config.get("minimum_quality_score", 0.6))
+    if output_profile["quality_score"] < minimum_quality:
+        raise ValueError(
+            f"Output quality gate failed: score {output_profile['quality_score']} is below configured minimum {minimum_quality}"
+        )
     candidate_path = f"staging/{state['project_id']}/{state['pipeline_id']}.csv"
     await get_storage().write(candidate_path, output_bytes, "text/csv")
     state.update({
