@@ -81,6 +81,13 @@ class DatasetOperationAgent(BaseAgent):
             await self.log_decision("DATA_QUALITY_PROFILED", f"Calculated quality score {profile['quality_score']}", 1.0)
             return {"dataset_id": dataset.id, "quality_score": profile["quality_score"], "profile": profile}
         if self.name in {"cleaning", "features"}:
+            pii_columns = _detect_pii(frame)
+            source_profile = dataset.profile_json or {}
+            if pii_columns and not source_profile.get("masking_applied"):
+                raise ValidationError(
+                    "Sensitive columns were detected. Run the governed pipeline to mask and approve this dataset before cleaning or feature publication.",
+                    {"columns": list(pii_columns)},
+                )
             plan = context.get("transformation_plan")
             if plan is None and self.name == "cleaning":
                 plan = {"operations": [{"op": "drop_duplicates"}]}
