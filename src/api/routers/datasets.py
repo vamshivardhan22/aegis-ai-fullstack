@@ -77,7 +77,9 @@ async def create_dataset(
     project_id = payload.project_id or await _ensure_project(session, current_user)
     await require_project_access(session, current_user, project_id)
     data = payload.content.encode("utf-8") if payload.content is not None else None
-    if data is not None and payload.source_type.lower() != "csv":\n        raise HTTPException(status_code=422, detail="Inline content is supported only for CSV datasets")\n    if data is not None and len(data) > MAX_CSV_BYTES:
+    if data is not None and payload.source_type.lower() != "csv":
+        raise HTTPException(status_code=422, detail="Inline content is supported only for CSV datasets")
+    if data is not None and len(data) > MAX_CSV_BYTES:
         raise HTTPException(status_code=413, detail="CSV exceeds the 10 MiB upload limit")
     schema, profile, rows, columns = _profile_csv(data) if data is not None else ({}, {}, 0, 0)
     key = f"bronze/{project_id}/{uuid4().hex}/{name}.csv"
