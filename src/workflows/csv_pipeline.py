@@ -183,9 +183,19 @@ async def _profile_node(state: CSVWorkflowState) -> CSVWorkflowState:
         if pipeline is None:
             raise ValueError("Pipeline not found")
         dataset = await DatasetRepository(session).get_by_id(pipeline.dataset_id)
-        if dataset is None or dataset.project_id != pipeline.project_id or not dataset.bronze_path:
-            raise ValueError("Pipeline source dataset or Bronze artifact is unavailable")
-        raw = await get_storage().read(dataset.bronze_path)
+        if dataset is None or dataset.project_id != pipeline.project_id:
+            raise ValueError("Pipeline source dataset is unavailable")
+        config = dict(pipeline.config or {})
+        source_layer = config.get("source_layer")
+        if source_layer is not None and source_layer not in {"bronze", "silver", "gold"}:
+            raise ValueError("source_layer must be bronze, silver, or gold")
+        if source_layer:
+            source_path = getattr(dataset, f"{source_layer}_path")
+        else:
+            source_path = dataset.gold_path or dataset.silver_path or dataset.bronze_path
+        if not source_path:
+            raise ValueError("Pipeline source dataset has no stored CSV artifact")
+        raw = await get_storage().read(source_path)
         if len(raw) > MAX_PIPELINE_BYTES:
             raise ValueError("Source CSV exceeds the 50 MiB pipeline execution limit")
         if not raw:
@@ -200,7 +210,6 @@ async def _profile_node(state: CSVWorkflowState) -> CSVWorkflowState:
             raise ValueError("CSV must contain between 1 and 500 columns")
         if frame.columns.duplicated().any():
             raise ValueError("CSV contains duplicate column names")
-        config = dict(pipeline.config or {})
         required_columns = config.get("required_columns", [])
         if not isinstance(required_columns, list) or not all(isinstance(item, str) for item in required_columns):
             raise ValueError("required_columns must be a list of column names")
@@ -218,7 +227,7 @@ async def _profile_node(state: CSVWorkflowState) -> CSVWorkflowState:
         state.update({
             "dataset_id": dataset.id,
             "project_id": pipeline.project_id,
-            "source_path": dataset.bronze_path,
+            "source_path": source_path,
             "source_sha256": profile["source_sha256"],
             "input_schema": {str(column): str(dtype) for column, dtype in frame.dtypes.items()},
             "profile": profile,
