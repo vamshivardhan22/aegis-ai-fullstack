@@ -1,7 +1,9 @@
 """Data transformation agent using validated declarative plans, never executable model code."""
+import hashlib
 import io
 import json
 import re
+from uuid import uuid4
 from typing import Any
 
 import pandas as pd
@@ -25,7 +27,8 @@ class TransformAgent(BaseAgent):
     async def execute(self, context: dict[str, Any]) -> dict[str, Any]:
         """Transform a source CSV into a silver dataset."""
         try:
-            df = pd.read_csv(io.BytesIO(await self.storage.read(context["source_data_path"])))
+            source_bytes = await self.storage.read(context["source_data_path"])
+            df = pd.read_csv(io.BytesIO(source_bytes))
             source = None
             if isinstance(self.db_repo, AsyncSession):
                 source = await DatasetRepository(self.db_repo).get_by_id(context["source_dataset_id"])
@@ -43,8 +46,13 @@ class TransformAgent(BaseAgent):
             result = apply_transformation_plan(df, plan)
             if result.empty:
                 raise ValidationError("Transformation produced zero rows")
-            key = "silver/" + str(context["output_name"]) + ".csv"
-            await self.store_artifact(key, result.to_csv(index=False).encode(), "text/csv")
+            output_name = context.get("output_name")
+            if not isinstance(output_name, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,99}", output_name) or ".." in output_name:
+                raise ValidationError("output_name must be a safe 1-100 character identifier")
+            output_bytes = result.to_csv(index=False).encode("utf-8")
+            output_sha256 = hashlib.sha256(output_bytes).hexdigest()
+            key = "silver/" + (source.project_id if source is not None else str(context.get("project_id", "unscoped"))) + "/" + uuid4().hex + ".csv"
+            await self.store_artifact(key, output_bytes, "text/csv")
             dataset_id = ""
             lineage_id = ""
             if isinstance(self.db_repo, AsyncSession):
@@ -133,10 +141,7 @@ class TransformAgent(BaseAgent):
 
     def _schema_for_prompt(self, df: pd.DataFrame) -> dict[str, Any]:
         """Return compact schema and samples for prompting."""
-        return {
-            column: {"dtype": str(df[column].dtype), "samples": df[column].head(3).astype(str).tolist()}
-            for column in df.columns
-        }
+        return {column: {"dtype": str(df[column].dtype)} for column in df.columns}
 
     def _schema_json(self, df: pd.DataFrame) -> dict[str, str]:
         """Return JSON-serializable pandas dtypes."""
