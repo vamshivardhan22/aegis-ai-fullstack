@@ -91,6 +91,7 @@ class PIIDetectionAgent(BaseAgent):
             key = f"pii-reports/{context['dataset_id']}.json"
             await self.store_artifact(key, json.dumps(report, indent=2).encode(), "application/json")
             masked_output_path = None
+            masked_dataset = None
             if context.get("apply_masking") is True:
                 masked = df.copy(deep=True)
                 for item in report_columns:
@@ -156,7 +157,7 @@ class PIIDetectionAgent(BaseAgent):
                 "rows_scanned": int(len(df)),
                 "scan_coverage": "full_dataset",
                 "masked_output_path": masked_output_path,
-                "masked_dataset_id": masked_dataset.id if masked_output_path and source_dataset is not None else None,
+                "masked_dataset_id": masked_dataset.id if masked_dataset is not None else None,
                 "masking_applied": bool(report_columns) and masked_output_path is not None,
             }
         except ValidationError:
