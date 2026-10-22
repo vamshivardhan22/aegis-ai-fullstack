@@ -219,6 +219,12 @@ async def test_ml_agent_trains_and_registers_a_model(client: AsyncClient) -> Non
     artifact = await client.get(f"/models/{result['model_id']}/download", headers=headers)
     assert artifact.status_code == 200
     assert len(artifact.content) > 100
+    analyst_token = await _token(client, role="analyst")
+    analyst_headers = {"Authorization": f"Bearer {analyst_token}"}
+    hidden_model = await client.get(f"/models/{result['model_id']}", headers=analyst_headers)
+    hidden_artifact = await client.get(f"/models/{result['model_id']}/download", headers=analyst_headers)
+    assert hidden_model.status_code == 404
+    assert hidden_artifact.status_code == 404
 
 
 @pytest.mark.asyncio
