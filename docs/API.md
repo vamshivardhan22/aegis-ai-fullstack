@@ -57,6 +57,7 @@ The workflow validates and profiles the source, applies the allow-listed transfo
 - `GET /pipelines/{pipeline_id}`: fetch a scoped run record and checkpoint metadata.
 - `POST /pipelines/{pipeline_id}/resume`: retry a failed run or publish an approved checkpoint.
 - `GET /approvals/pending`: list approvals in projects visible to the caller.
+- `GET /chat/history`: return the caller's last 50 persisted chat turns; pass `project_id` to filter to one authorized project.
 - `POST /approvals/{pipeline_id}/approve` and `POST /approvals/{pipeline_id}/reject`: persist a decision and audit record. Rejection never publishes the staged artifact.
 ## Agent Endpoints
 
