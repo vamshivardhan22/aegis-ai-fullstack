@@ -7,7 +7,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from src.api.routers import admin, agents, approval, auth, chat, datasets, lineage, pipelines
+from src.api.routers import admin, agents, approval, auth, chat, datasets, lineage, models, pipelines
 from src.api.routers.health import router as health_router
 from src.config import get_settings
 from src.core.exceptions import ValidationError
