@@ -133,8 +133,8 @@ def _profile(frame: pd.DataFrame, source_bytes: bytes) -> dict[str, Any]:
     score = max(0.0, min(1.0, 1.0 - 0.7 * null_ratio - 0.3 * duplicate_ratio))
     return {
         "profile_version": 1,
-        "row_count": int(len(frame)),
-        "column_count": int(len(frame.columns)),
+        "row_count": len(frame),
+        "column_count": len(frame.columns),
         "null_counts": {str(column): int(count) for column, count in frame.isna().sum().items()},
         "null_cells": null_count,
         "duplicate_rows": duplicate_rows,
@@ -254,7 +254,7 @@ async def _transform_node(state: CSVWorkflowState) -> CSVWorkflowState:
     pii_columns = _detect_pii(frame)
     masked = frame.copy(deep=True)
     for column, kind in pii_columns.items():
-        masked[column] = masked[column].map(lambda value: _mask_value(value, kind))
+        masked[column] = masked[column].map(lambda value, kind=kind: _mask_value(value, kind))
     config = state.get("config", {})
     plan = config.get("transformation_plan", {"operations": []})
     if not isinstance(plan, dict):
@@ -278,8 +278,8 @@ async def _transform_node(state: CSVWorkflowState) -> CSVWorkflowState:
         "masking_applied": bool(pii_columns),
         "candidate_artifact": candidate_path,
         "output_schema": {str(column): str(dtype) for column, dtype in transformed.dtypes.items()},
-        "output_row_count": int(len(transformed)),
-        "output_column_count": int(len(transformed.columns)),
+        "output_row_count": len(transformed),
+        "output_column_count": len(transformed.columns),
         "output_size_bytes": len(output_bytes),
         "output_sha256": hashlib.sha256(output_bytes).hexdigest(),
         "output_profile": output_profile,
