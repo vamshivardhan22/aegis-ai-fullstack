@@ -332,11 +332,21 @@ def _build_graph():
 async def run_csv_pipeline(pipeline_id: str, actor_id: str | None = None) -> dict[str, Any]:
     """Execute the LangGraph CSV workflow and persist stage checkpoints in PostgreSQL."""
     async with AsyncSessionLocal() as session:
-        pipeline = await PipelineRepository(session).get_by_id(pipeline_id)
+        locked = await session.execute(
+            select(Pipeline).where(Pipeline.id == pipeline_id).with_for_update()
+        )
+        pipeline = locked.scalar_one_or_none()
         if pipeline is None:
             raise HTTPException(status_code=404, detail="Pipeline not found")
-        if pipeline.status == PipelineStatus.COMPLETED:
-            return {"pipeline_id": pipeline.id, "status": pipeline.status.value, "checkpoint": pipeline.checkpoint_data or {}}
+        if pipeline.status in {PipelineStatus.COMPLETED, PipelineStatus.APPROVAL_REQUIRED, PipelineStatus.RUNNING}:
+            return {
+                "pipeline_id": pipeline.id,
+                "status": pipeline.status.value,
+                "checkpoint": pipeline.checkpoint_data or {},
+                "message": "Existing execution state returned; duplicate execution was not started.",
+            }
+        if pipeline.status == PipelineStatus.FAILED:
+            raise HTTPException(status_code=409, detail="Failed pipelines must be explicitly reset before retry")
         state: CSVWorkflowState = {"pipeline_id": pipeline.id, "actor_id": actor_id, "stage": "queued"}
         await PipelineRepository(session).update(
             pipeline.id,
