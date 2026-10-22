@@ -6,8 +6,13 @@ metadata:
 data:
   AEGIS_ENV: production
   AEGIS_STORAGE_BACKEND: minio
+  AEGIS_LLM_PROVIDER: openai
+  AEGIS_LLM_MODEL: gpt-4o-mini
+  AEGIS_EMBEDDING_PROVIDER: openai
+  AEGIS_EMBEDDING_MODEL: text-embedding-3-small
+  AEGIS_CORS_ORIGINS: https://your-domain.example
+  AEGIS_CORS_ORIGIN_REGEX: ""
   AEGIS_MINIO_ENDPOINT: minio:9000
   AEGIS_MLFLOW_TRACKING_URI: http://mlflow:5000
-  AEGIS_OLLAMA_URL: http://ollama:11434
   AEGIS_QDRANT_URL: http://qdrant:6333
   AEGIS_REDIS_URL: redis://redis:6379/0
