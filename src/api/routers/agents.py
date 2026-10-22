@@ -84,7 +84,11 @@ async def execute_agent(
     if supplied_paths and not dataset_id:
         raise HTTPException(status_code=404, detail="Dataset artifact not found")
     if dataset_id:
-        dataset = await require_dataset_access(session, current_user, str(dataset_id))
+        dataset_id = str(dataset_id)
+        context["dataset_id"] = dataset_id
+        if agent_type == "transform":
+            context.setdefault("source_dataset_id", dataset_id)
+        dataset = await require_dataset_access(session, current_user, dataset_id)
         if context.get("project_id") and context["project_id"] != dataset.project_id:
             raise HTTPException(status_code=404, detail="Dataset not found")
         for artifact_path in supplied_paths:
