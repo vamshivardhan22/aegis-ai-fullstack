@@ -73,14 +73,17 @@ class Settings(BaseSettings):
             problems.append("AEGIS_DB_URL must use PostgreSQL in production")
         if self.AEGIS_STORAGE_BACKEND == "local":
             problems.append("AEGIS_STORAGE_BACKEND must use durable shared storage in production")
-        if self.AEGIS_STORAGE_BACKEND == "supabase" and not (
-            self.AEGIS_SUPABASE_URL and self.AEGIS_SUPABASE_SERVICE_ROLE_KEY
+        if self.AEGIS_STORAGE_BACKEND == "supabase" and (
+            not self.AEGIS_SUPABASE_URL
+            or not self.AEGIS_SUPABASE_SERVICE_ROLE_KEY
+            or self.AEGIS_SUPABASE_SERVICE_ROLE_KEY.lower().startswith(("replace", "your_", "changeme"))
         ):
-            problems.append("Supabase URL and service-role key are required for production storage")
+            problems.append("Real Supabase URL and service-role key are required for production storage")
         if self.AEGIS_STORAGE_BACKEND == "minio" and (
-            self.AEGIS_MINIO_ACCESS_KEY == "minioadmin" or self.AEGIS_MINIO_SECRET_KEY == "minioadmin"
+            self.AEGIS_MINIO_ACCESS_KEY.lower().startswith(("replace", "your_", "minioadmin"))
+            or self.AEGIS_MINIO_SECRET_KEY.lower().startswith(("replace", "your_", "minioadmin"))
         ):
-            problems.append("Default MinIO credentials are forbidden in production")
+            problems.append("Default or placeholder MinIO credentials are forbidden in production")
         provider_key = {
             "openai": self.AEGIS_OPENAI_API_KEY,
             "anthropic": self.AEGIS_ANTHROPIC_API_KEY,
@@ -96,6 +99,8 @@ class Settings(BaseSettings):
             problems.append("AEGIS_CORS_ORIGIN_REGEX must be unset in production")
         if any("localhost" in origin or "127.0.0.1" in origin for origin in self.cors_origins):
             problems.append("AEGIS_CORS_ORIGINS must not include localhost in production")
+        if any("your-domain" in origin or ".example" in origin for origin in self.cors_origins):
+            problems.append("AEGIS_CORS_ORIGINS must use the actual deployed frontend domain")
         if problems:
             raise ValueError("Unsafe production configuration: " + "; ".join(problems))
         return self
