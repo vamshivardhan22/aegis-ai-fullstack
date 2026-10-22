@@ -154,7 +154,7 @@ class PIIDetectionAgent(BaseAgent):
                 "columns_flagged": len(report_columns),
                 "report_path": key,
                 "masking_recommendations": report_columns,
-                "rows_scanned": int(len(df)),
+                "rows_scanned": len(df),
                 "scan_coverage": "full_dataset",
                 "masked_output_path": masked_output_path,
                 "masked_dataset_id": masked_dataset.id if masked_dataset is not None else None,
