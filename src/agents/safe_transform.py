@@ -113,6 +113,8 @@ def apply_transformation_plan(frame: pd.DataFrame, plan: dict[str, Any]) -> pd.D
             if not isinstance(aggregations, dict) or not aggregations:
                 raise ValidationError("groupby_agg requires an aggregation mapping", {"step": index})
             _require_columns(result, groups + list(aggregations))
+            if set(groups).intersection(aggregations):
+                raise ValidationError("Group columns cannot also be aggregation targets", {"step": index})
             if not all(isinstance(column, str) and isinstance(aggregation, str) and aggregation in _ALLOWED_AGGREGATIONS for column, aggregation in aggregations.items()):
                 raise ValidationError("groupby_agg contains an unsupported aggregation", {"step": index})
             result = result.groupby(groups, dropna=False, as_index=False).agg(aggregations)
