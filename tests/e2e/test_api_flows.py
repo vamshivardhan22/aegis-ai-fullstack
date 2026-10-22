@@ -53,6 +53,9 @@ async def test_complete_pipeline_flow(client: AsyncClient) -> None:
     assert lineage.status_code == 200
     chat = await client.post("/chat/ask", headers=headers, json={"question": "What datasets are available?"})
     assert chat.status_code == 200
+    history = await client.get("/chat/history", headers=headers)
+    assert history.status_code == 200
+    assert any(item["question"] == "What datasets are available?" for item in history.json()["history"])
     profile = await client.get("/auth/me", headers=headers)
     assert profile.status_code == 200
 
