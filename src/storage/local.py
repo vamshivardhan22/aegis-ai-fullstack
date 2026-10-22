@@ -22,7 +22,7 @@ class LocalStorageAdapter(StorageAdapter):
         """Resolve and validate a storage key under the base path."""
 
         target = (self.base_path / key.lstrip("/")).resolve()
-        if not str(target).startswith(str(self.base_path)):
+        if not target.is_relative_to(self.base_path):
             raise StorageError("Storage key escapes base path", {"key": key})
         return target
 
