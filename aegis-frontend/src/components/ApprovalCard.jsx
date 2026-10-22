@@ -1,12 +1,12 @@
-import { Check, Edit3, X } from "lucide-react";
+import { Check, X } from "lucide-react";
 import { useState } from "react";
 import { cn } from "../lib/utils.js";
 
 const riskTone = { high: "bg-aegis-red/15 text-aegis-red border-aegis-red/35", medium: "bg-aegis-orange/15 text-aegis-orange border-aegis-orange/35", low: "bg-aegis-green/15 text-aegis-green border-aegis-green/35" };
 
-export default function ApprovalCard({ approval, onApprove, onReject, onModify }) {
+export default function ApprovalCard({ approval, onApprove, onReject }) {
   const [leaving, setLeaving] = useState(false);
-  const action = async (fn) => { setLeaving(true); await new Promise((resolve) => setTimeout(resolve, 260)); fn(approval.id); };
+  const action = async (fn) => {\n    setLeaving(true);\n    try { await fn(approval.id); } finally { setLeaving(false); }\n  };
   return (
     <div className={cn("panel p-5 transition", leaving && "animate-slideAway")}>
       <div className="flex flex-wrap items-start justify-between gap-3">
