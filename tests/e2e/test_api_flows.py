@@ -204,3 +204,33 @@ async def test_ml_agent_trains_and_registers_a_model(client: AsyncClient) -> Non
     assert result["algorithm"] == "RandomForestClassifier"
     assert 0 <= result["metrics"]["accuracy"] <= 1
     assert result["artifact_path"].endswith(".joblib")
+
+
+@pytest.mark.asyncio
+async def test_rejected_pii_pipeline_never_publishes_output(client: AsyncClient) -> None:
+    """Rejecting a sensitive-data checkpoint must leave the output unpublished."""
+    token = await _token(client, role="data_engineer")
+    headers = {"Authorization": f"Bearer {token}"}
+    created = await client.post(
+        "/datasets/",
+        headers=headers,
+        json={"name": "rejected_orders", "content": "order_id,customer_email\n1,secret@example.com\n", "source_type": "csv"},
+    )
+    assert created.status_code == 200, created.text
+    started = await client.post("/pipelines/", headers=headers, json={"dataset_id": created.json()["id"]})
+    assert started.status_code == 200, started.text
+    pipeline_id = started.json()["pipeline"]["id"]
+    assert started.json()["pipeline"]["status"] == PipelineStatus.APPROVAL_REQUIRED.value
+
+    rejected = await client.post(
+        f"/approvals/{pipeline_id}/reject",
+        headers=headers,
+        json={"decision": "reject", "rationale": "Rejected for policy review."},
+    )
+    assert rejected.status_code == 200, rejected.text
+    async with AsyncSessionLocal() as session:
+        pipeline = await session.get(Pipeline, pipeline_id)
+        assert pipeline is not None
+        assert pipeline.status == PipelineStatus.FAILED
+        assert pipeline.checkpoint_data["stage"] == "rejected"
+        assert "output_dataset_id" not in pipeline.checkpoint_data
