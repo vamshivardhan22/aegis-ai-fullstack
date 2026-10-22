@@ -134,6 +134,15 @@ async def test_dataset_and_lineage_are_project_scoped(client: AsyncClient) -> No
     )
     assert created.status_code == 200, created.text
     dataset_id = created.json()["id"]
+    chat = await client.post(
+        "/chat/ask",
+        headers=engineer_headers,
+        json={"question": "What is the quality score for private_orders?"},
+    )
+    assert chat.status_code == 200
+    analyst_history = await client.get("/chat/history", headers=analyst_headers)
+    assert analyst_history.status_code == 200
+    assert analyst_history.json()["history"] == []
 
     hidden_dataset = await client.get(f"/datasets/{dataset_id}", headers=analyst_headers)
     hidden_lineage = await client.get(f"/lineage/datasets/{dataset_id}", headers=analyst_headers)
