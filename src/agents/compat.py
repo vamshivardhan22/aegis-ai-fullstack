@@ -7,12 +7,14 @@ import json
 from typing import Any
 
 import pandas as pd
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.agents.base import BaseAgent
 from src.agents.safe_transform import apply_transformation_plan
 from src.core.exceptions import ValidationError
-from src.database.repository import DatasetRepository
+from src.database.models import Dataset, Lineage
+from src.database.repository import DatasetRepository, LineageRepository
 
 
 class CompatibilityAgent(BaseAgent):
@@ -84,8 +86,45 @@ class CompatibilityAgent(BaseAgent):
         if self.name in {"cleaning", "features"}:
             key = f"silver/{dataset.project_id}/{dataset.id}-{self.name}.csv"
             data = frame.to_csv(index=False).encode()
+            digest = hashlib.sha256(data).hexdigest()
             await self.store_artifact(key, data, "text/csv")
-            result.update({"output_path": key, "rows": len(frame), "sha256": hashlib.sha256(data).hexdigest()})
+            output_name = f"{dataset.name}-{self.name}"
+            existing = await self.db_repo.execute(
+                select(Dataset).where(Dataset.project_id == dataset.project_id, Dataset.name == output_name)
+            )
+            target = existing.scalar_one_or_none()
+            values = {
+                "silver_path": key,
+                "source_type": "transformed",
+                "schema_json": {str(col): str(dtype) for col, dtype in frame.dtypes.items()},
+                "profile_json": {"source_dataset_id": dataset.id, "stage": self.name, "sha256": digest},
+                "row_count": len(frame),
+                "column_count": len(frame.columns),
+                "size_bytes": len(data),
+                "version": dataset.version + 1,
+            }
+            if target is None:
+                target = await DatasetRepository(self.db_repo).create(
+                    Dataset(project_id=dataset.project_id, name=output_name, **values)
+                )
+            else:
+                target = await DatasetRepository(self.db_repo).update(target.id, values)
+            if target is None:
+                raise ValidationError("Transformed dataset metadata could not be persisted")
+            lineage_repo = LineageRepository(self.db_repo)
+            edge_result = await self.db_repo.execute(select(Lineage).where(
+                Lineage.source_dataset_id == dataset.id, Lineage.target_dataset_id == target.id
+            ))
+            if edge_result.scalar_one_or_none() is None:
+                await lineage_repo.create(Lineage(
+                    source_dataset_id=dataset.id,
+                    target_dataset_id=target.id,
+                    transformation_type=self.name,
+                    agent_id=self.name,
+                    sql_code="Validated deterministic transformation",
+                    config_json={"sha256": digest},
+                ))
+            result.update({"output_path": key, "output_dataset_id": target.id, "rows": len(frame), "sha256": digest})
         else:
             key = f"reports/{dataset.project_id}/{dataset.id}/{self.name}.json"
             await self.store_artifact(key, json.dumps(result, indent=2).encode(), "application/json")
