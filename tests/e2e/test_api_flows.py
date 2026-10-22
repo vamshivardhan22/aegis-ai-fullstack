@@ -64,14 +64,8 @@ async def test_complete_pipeline_flow(client: AsyncClient) -> None:
             {"op": "select_columns", "columns": ["id", "amount"]},
         ]}},
     )
-    assert features.status_code == 200
-    assert features.json()["columns"] == ["id", "amount"]
-    assert features.json()["output_dataset_id"]
-    feature_dataset = await client.get(f"/datasets/{features.json()['output_dataset_id']}", headers=headers)
-    assert feature_dataset.status_code == 200
-    feature_lineage = await client.get(f"/lineage/datasets/{dataset_id}", headers=headers)
-    assert feature_lineage.status_code == 200
-    assert any(edge["target"] == features.json()["output_dataset_id"] for edge in feature_lineage.json()["edges"])
+    assert features.status_code == 422
+    assert "governed pipeline" in features.json()["detail"]["message"]
     ml = await client.post("/agents/ml/execute", headers=headers, json={"dataset_id": dataset_id})
     assert ml.status_code == 200
     pii = await client.post(
@@ -228,4 +222,33 @@ async def test_ml_agent_trains_and_registers_a_baseline(client: AsyncClient) -> 
         assert record is not None
         assert record.artifact_path == result["model_path"]
         assert record.status.value == "staging"
+
+@pytest.mark.asyncio
+async def test_features_agent_persists_output_and_lineage_for_non_sensitive_data(client: AsyncClient) -> None:
+    """A safe declarative feature plan creates a dataset and a lineage edge."""
+    token = await _token(client, role="data_engineer")
+    headers = {"Authorization": f"Bearer {token}"}
+    created = await client.post(
+        "/datasets/",
+        headers=headers,
+        json={"name": "feature_orders", "content": "order_id,amount\\n1,10\\n2,20\\n", "source_type": "csv"},
+    )
+    assert created.status_code == 200, created.text
+    dataset_id = created.json()["id"]
+    response = await client.post(
+        "/agents/features/execute",
+        headers=headers,
+        json={"dataset_id": dataset_id, "transformation_plan": {"operations": [
+            {"op": "cast", "columns": {"amount": "float"}},
+            {"op": "select_columns", "columns": ["order_id", "amount"]},
+        ]}},
+    )
+    assert response.status_code == 200, response.text
+    result = response.json()
+    assert result["columns"] == ["order_id", "amount"]
+    output = await client.get(f"/datasets/{result['output_dataset_id']}", headers=headers)
+    assert output.status_code == 200
+    lineage = await client.get(f"/lineage/datasets/{dataset_id}", headers=headers)
+    assert lineage.status_code == 200
+    assert any(edge["target"] == result["output_dataset_id"] for edge in lineage.json()["edges"])
 
