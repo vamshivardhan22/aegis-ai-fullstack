@@ -41,6 +41,8 @@ class AsyncVectorStore:
         """Ensure the vector collection exists."""
 
         if self.client is None:
+            if self.settings.AEGIS_ENV == "production":
+                raise RuntimeError("Qdrant is required in production; in-memory vector storage is not durable")
             _MEMORY_COLLECTIONS.setdefault(self.collection_name, [])
             return
         try:
@@ -54,6 +56,8 @@ class AsyncVectorStore:
                     vectors_config=VectorParams(size=self.vector_size, distance=Distance.COSINE),
                 )
         except Exception as exc:
+            if self.settings.AEGIS_ENV == "production":
+                raise RuntimeError("Qdrant collection initialization failed") from exc
             logger.warning("qdrant_collection_fallback", error=str(exc))
             self.client = None
             _MEMORY_COLLECTIONS.setdefault(self.collection_name, [])
@@ -75,6 +79,8 @@ class AsyncVectorStore:
                 points=[PointStruct(id=point_id, vector=vector, payload=payload)],
             )
         except Exception as exc:
+            if self.settings.AEGIS_ENV == "production":
+                raise RuntimeError("Qdrant upsert failed; refusing non-durable fallback") from exc
             logger.warning("qdrant_upsert_fallback", error=str(exc))
             self.client = None
             await self.upsert(point_id, vector, payload)
@@ -98,6 +104,8 @@ class AsyncVectorStore:
             hits = await self.client.search(collection_name=self.collection_name, query_vector=vector, limit=limit)
             return [{"id": str(hit.id), "score": float(hit.score), "payload": hit.payload or {}} for hit in hits]
         except Exception as exc:
+            if self.settings.AEGIS_ENV == "production":
+                raise RuntimeError("Qdrant search failed; refusing non-durable fallback") from exc
             logger.warning("qdrant_search_fallback", error=str(exc))
             self.client = None
             return await self.search(vector, limit)
@@ -112,6 +120,8 @@ class AsyncVectorStore:
             collections = await self.client.get_collections()
             return any(collection.name == self.collection_name for collection in collections.collections)
         except Exception as exc:
+            if self.settings.AEGIS_ENV == "production":
+                raise RuntimeError("Qdrant health check failed") from exc
             logger.warning("qdrant_exists_fallback", error=str(exc))
             self.client = None
             return await self.collection_exists()
@@ -232,12 +242,12 @@ class RAGKnowledgeAgent(BaseAgent):
 
         try:
             embedding = await self.llm.embed(text, model=get_settings().AEGIS_EMBEDDING_MODEL)
-            if len(embedding) == VECTOR_SIZE:
-                return embedding
-            if len(embedding) > VECTOR_SIZE:
-                return embedding[:VECTOR_SIZE]
-            return embedding + [0.0] * (VECTOR_SIZE - len(embedding))
+            if len(embedding) != VECTOR_SIZE:
+                raise ValueError(f"Expected {VECTOR_SIZE}-dimensional embedding, received {len(embedding)}")
+            return embedding
         except Exception as exc:
+            if get_settings().AEGIS_ENV == "production":
+                raise RuntimeError("Embedding provider failed; refusing synthetic embeddings in production") from exc
             logger.warning("embedding_fallback", error=str(exc))
             return self._deterministic_embedding(text)
 
