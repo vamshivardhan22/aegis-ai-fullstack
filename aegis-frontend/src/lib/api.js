@@ -4,7 +4,7 @@ export const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
 const api = axios.create({ baseURL: API_URL, timeout: 10000 });
 
-export async function registerAccount({ email, password, full_name, role }) {
+export async function listPipelines() {\n  const { data } = await api.get("/pipelines/");\n  return data.pipelines || [];\n}\n\nexport async function createPipeline({ dataset_id, name, config = {} }) {\n  const { data } = await api.post("/pipelines/", { dataset_id, name, config }, { timeout: 120000 });\n  return data;\n}\n\nexport async function resumePipeline(pipelineId) {\n  const { data } = await api.post(`/pipelines/${encodeURIComponent(pipelineId)}/resume`, {}, { timeout: 120000 });\n  return data;\n}\n\nexport async function listDatasets(projectId) {\n  const { data } = await api.get("/datasets/", { params: projectId ? { project_id: projectId } : {} });\n  return data.datasets || [];\n}\n\nexport async function registerAccount({ email, password, full_name, role }) {
   const { data } = await api.post("/auth/register", { email, password, full_name, role });
   return data;
 }
