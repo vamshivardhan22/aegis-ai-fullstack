@@ -40,7 +40,8 @@ async def dataset_lineage(
         """
         WITH RECURSIVE upstream(source_dataset_id, target_dataset_id, transformation_type, agent_id, depth) AS (
             SELECT source_dataset_id, target_dataset_id, transformation_type, agent_id, 1
-            FROM lineage l JOIN datasets source_ds ON source_ds.id = l.source_dataset_id JOIN datasets target_ds ON target_ds.id = l.target_dataset_id\n            WHERE l.target_dataset_id = :dataset_id AND source_ds.project_id = :project_id AND target_ds.project_id = :project_id
+            FROM lineage l JOIN datasets source_ds ON source_ds.id = l.source_dataset_id JOIN datasets target_ds ON target_ds.id = l.target_dataset_id
+            WHERE l.target_dataset_id = :dataset_id AND source_ds.project_id = :project_id AND target_ds.project_id = :project_id
             UNION ALL
             SELECT l.source_dataset_id, l.target_dataset_id, l.transformation_type, l.agent_id, u.depth + 1
             FROM lineage l JOIN upstream u ON l.target_dataset_id = u.source_dataset_id
@@ -53,7 +54,8 @@ async def dataset_lineage(
         """
         WITH RECURSIVE downstream(source_dataset_id, target_dataset_id, transformation_type, agent_id, depth) AS (
             SELECT source_dataset_id, target_dataset_id, transformation_type, agent_id, 1
-            FROM lineage l JOIN datasets source_ds ON source_ds.id = l.source_dataset_id JOIN datasets target_ds ON target_ds.id = l.target_dataset_id\n            WHERE l.source_dataset_id = :dataset_id AND source_ds.project_id = :project_id AND target_ds.project_id = :project_id
+            FROM lineage l JOIN datasets source_ds ON source_ds.id = l.source_dataset_id JOIN datasets target_ds ON target_ds.id = l.target_dataset_id
+            WHERE l.source_dataset_id = :dataset_id AND source_ds.project_id = :project_id AND target_ds.project_id = :project_id
             UNION ALL
             SELECT l.source_dataset_id, l.target_dataset_id, l.transformation_type, l.agent_id, d.depth + 1
             FROM lineage l JOIN downstream d ON l.source_dataset_id = d.target_dataset_id
@@ -107,7 +109,8 @@ async def pipeline_lineage(
     pipeline = await PipelineRepository(session).get_by_id(pipeline_id)
     if pipeline is None:
         raise HTTPException(status_code=404, detail={"detail": "Pipeline not found", "code": "NOT_FOUND"})
-    await require_project_access(session, current_user, pipeline.project_id)\n    return await dataset_lineage(pipeline.dataset_id, session, current_user)
+    await require_project_access(session, current_user, pipeline.project_id)
+    return await dataset_lineage(pipeline.dataset_id, session, current_user)
 
 
 @router.get("/impact/{dataset_id}")
@@ -118,7 +121,9 @@ async def lineage_impact(
 ) -> dict[str, Any]:
     """Return downstream datasets, models, and deployments affected by a dataset change."""
 
-    root_dataset = await require_dataset_access(session, current_user, dataset_id)\n    project_id = root_dataset.project_id\n    sql = text(
+    root_dataset = await require_dataset_access(session, current_user, dataset_id)
+    project_id = root_dataset.project_id
+    sql = text(
         """
         WITH RECURSIVE downstream(source_dataset_id, target_dataset_id, depth) AS (
             SELECT l.source_dataset_id, l.target_dataset_id, 1 FROM lineage l JOIN datasets s ON s.id = l.source_dataset_id JOIN datasets t ON t.id = l.target_dataset_id WHERE l.source_dataset_id = :dataset_id AND s.project_id = :project_id AND t.project_id = :project_id
@@ -160,7 +165,11 @@ async def record_lineage(
 ) -> dict[str, Any]:
     """Create a lineage edge."""
 
-    source = await require_dataset_access(session, current_user, payload.source_dataset_id)\n    target = await require_dataset_access(session, current_user, payload.target_dataset_id)\n    if source.project_id != target.project_id:\n        raise HTTPException(status_code=422, detail="Lineage edges must stay within one project")\n    lineage = await LineageRepository(session).create(
+    source = await require_dataset_access(session, current_user, payload.source_dataset_id)
+    target = await require_dataset_access(session, current_user, payload.target_dataset_id)
+    if source.project_id != target.project_id:
+        raise HTTPException(status_code=422, detail="Lineage edges must stay within one project")
+    lineage = await LineageRepository(session).create(
         Lineage(
             source_dataset_id=payload.source_dataset_id,
             target_dataset_id=payload.target_dataset_id,
