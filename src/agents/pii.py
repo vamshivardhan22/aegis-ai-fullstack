@@ -1,5 +1,7 @@
 """PII detection and masking recommendation agent."""
 
+import hashlib
+import hmac
 import io
 import json
 import re
@@ -14,7 +16,8 @@ from src.core.logging import configure_logging
 from src.database.models import Alert, AlertSeverity
 from src.database.repository import AlertRepository
 
-logger = configure_logging(get_settings().AEGIS_DEBUG)
+settings = get_settings()
+logger = configure_logging(settings.AEGIS_DEBUG)
 
 
 class PIIDetectionAgent(BaseAgent):
@@ -45,7 +48,10 @@ class PIIDetectionAgent(BaseAgent):
         """Scan a CSV sample for PII."""
 
         try:
-            df = pd.read_csv(io.BytesIO(await self.storage.read(context["data_sample_path"]))).head(1000)
+            raw_data = await self.storage.read(context["data_sample_path"])
+            if len(raw_data) > 50 * 1024 * 1024:
+                return {"pii_failed": True, "error": "PII scan input exceeds the 50 MiB scan limit."}
+            df = pd.read_csv(io.BytesIO(raw_data))
             report_columns = []
             for column in df.columns:
                 pii_type, confidence = await self._score_column(column, df[column])
@@ -62,9 +68,26 @@ class PIIDetectionAgent(BaseAgent):
                             else "",
                         }
                     )
-            report = {"dataset_id": context["dataset_id"], "columns": report_columns}
+            report = {
+                "dataset_id": context["dataset_id"],
+                "rows_scanned": int(len(df)),
+                "columns_scanned": int(len(df.columns)),
+                "scan_coverage": "full_dataset",
+                "columns": report_columns,
+            }
             key = f"pii-reports/{context['dataset_id']}.json"
             await self.store_artifact(key, json.dumps(report, indent=2).encode(), "application/json")
+            masked_output_path = None
+            if context.get("apply_masking") is True:
+                masked = df.copy(deep=True)
+                for item in report_columns:
+                    column = item["name"]
+                    strategy = item["masking_strategy"]
+                    masked[column] = masked[column].map(
+                        lambda value: value if pd.isna(value) else self._mask_value(str(value), strategy)
+                    )
+                masked_output_path = f"masked/{context['dataset_id']}.csv"
+                await self.store_artifact(masked_output_path, masked.to_csv(index=False).encode("utf-8"), "text/csv")
             if report_columns and isinstance(self.db_repo, AsyncSession):
                 await AlertRepository(self.db_repo).create(
                     Alert(
@@ -84,6 +107,10 @@ class PIIDetectionAgent(BaseAgent):
                 "columns_flagged": len(report_columns),
                 "report_path": key,
                 "masking_recommendations": report_columns,
+                "rows_scanned": int(len(df)),
+                "scan_coverage": "full_dataset",
+                "masked_output_path": masked_output_path,
+                "masking_applied": masked_output_path is not None,
             }
         except Exception as exc:
             logger.error("pii_agent_failed", error=str(exc))
@@ -96,20 +123,20 @@ class PIIDetectionAgent(BaseAgent):
         for hint, pii_type in self.NAME_HINTS.items():
             if hint in lowered:
                 return pii_type, 0.92
-        values = series.dropna().astype(str).head(50).tolist()
+        values = series.dropna().astype(str).tolist()
         if not values:
             return "unknown", 0.0
         best_type = "unknown"
         best_score = 0.0
         for pii_type, pattern in self.PATTERNS.items():
-            matches = sum(1 for value in values if pattern.search(value.strip()))
+            matches = sum(1 for value in values if pattern.fullmatch(value.strip()))
             score = matches / len(values)
             if score > best_score:
                 best_type = pii_type
                 best_score = score
         if best_score > 0.7:
             return best_type, min(0.98, best_score)
-        ner_score = self._spacy_name_score(values)
+        ner_score = self._spacy_name_score(values[:50])
         if ner_score > best_score:
             return "name", ner_score
         try:
@@ -168,8 +195,11 @@ class PIIDetectionAgent(BaseAgent):
 
         if strategy == "mask_last_4":
             return "*" * max(len(value) - 4, 0) + value[-4:]
-        if strategy == "hash":
-            return "hash:" + str(abs(hash(value)))[:10]
-        if strategy == "tokenize":
-            return "token:<redacted>"
+        if strategy in {"hash", "tokenize"}:
+            digest = hmac.new(
+                settings.AEGIS_SECRET_KEY.encode("utf-8"),
+                value.encode("utf-8"),
+                hashlib.sha256,
+            ).hexdigest()[:20]
+            return ("hash:" if strategy == "hash" else "token:") + digest
         return "<redacted>"
