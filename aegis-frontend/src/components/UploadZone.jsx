@@ -1,4 +1,4 @@
-import { FileJson, FileSpreadsheet, Upload } from "lucide-react";
+import { FileSpreadsheet, Upload } from "lucide-react";
 import { useState } from "react";
 import { formatBytes } from "../lib/utils.js";
 
@@ -31,8 +31,8 @@ export default function UploadZone({ onUpload }) {
       <label onDragOver={(event) => { event.preventDefault(); setDragging(true); }} onDragLeave={() => setDragging(false)} onDrop={(event) => { event.preventDefault(); setDragging(false); handleFile(event.dataTransfer.files?.[0]); }} className={`flex min-h-[260px] cursor-pointer flex-col items-center justify-center rounded-card border-2 border-dashed p-8 text-center transition ${dragging ? "border-aegis-blue bg-aegis-blue/10 shadow-glow" : "border-aegis-border bg-aegis-card/70 hover:border-aegis-blue"}`}>
         <Upload className="h-12 w-12 text-aegis-blue" />
         <p className="mt-4 text-xl font-bold text-white">Drop your dataset here</p>
-        <p className="mt-2 text-sm text-aegis-muted">CSV, Excel, and JSON files are supported</p>
-        <input type="file" accept=".csv,.xlsx,.xls,.json" className="hidden" onChange={(event) => handleFile(event.target.files?.[0])} />
+        <p className="mt-2 text-sm text-aegis-muted">CSV files only · maximum 10 MiB</p>
+        <input type="file" accept=".csv" className="hidden" onChange={(event) => handleFile(event.target.files?.[0])} />
       </label>
       {file ? (
         <div className="panel mt-5 p-5">
