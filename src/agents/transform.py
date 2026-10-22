@@ -103,8 +103,10 @@ class TransformAgent(BaseAgent):
         prompt = (
             "Return JSON only with keys plan, explanation, output_columns. "
             "plan must contain an operations list with at most 25 allow-listed steps. "
-            "Allowed operations: select_columns(columns), drop_columns(columns), rename_columns(mapping), "
-            "fillna(columns,value), filter(column,operator,value), groupby_agg(group_by,aggregations), cast(columns). "
+            "Allowed operations: select_columns(columns), drop_columns(columns), drop_duplicates(subset,keep), "
+            "rename_columns(mapping), fillna(columns,value), filter(column,operator,value), "
+            "groupby_agg(group_by,aggregations), cast(columns), derive_numeric(name,left,operator,right_column|value), "
+            "derive_string(name,column,operation), derive_datetime(name,column,part). "
             "Allowed filters: eq, ne, gt, gte, lt, lte, contains, is_null, not_null. "
             "Allowed aggregations: sum, mean, min, max, count, nunique. "
             "Allowed cast types: string, integer, float, boolean, datetime. "
