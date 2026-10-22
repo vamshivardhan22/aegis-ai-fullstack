@@ -94,7 +94,7 @@ jobs:
 
   e2e-test:
     name: Final E2E gate
-    needs: [integration-test, build]
+    needs: [lint, unit-test, integration-test, build]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
