@@ -5,7 +5,7 @@ import { useToast } from "../components/Toast.jsx";
 import { createPipeline, listDatasets, uploadDataset } from "../lib/api.js";
 
 export default function Upload() {
-  const [file, setFile] = useState(null);
+  const [file, setFile] = useState(null);\n  const [uploadKey, setUploadKey] = useState(0);
   const [recent, setRecent] = useState([]);
   const [busy, setBusy] = useState(false);
   const [loadingRecent, setLoadingRecent] = useState(true);
@@ -61,7 +61,7 @@ export default function Upload() {
   return (
     <div className="grid gap-6 xl:grid-cols-[1fr_360px]">
       <section>
-        <UploadZone onUpload={setFile} />
+        <UploadZone key={uploadKey} onUpload={setFile} />
         <button type="button" disabled={!file || busy} onClick={start} className="gradient-button mt-5 disabled:cursor-not-allowed disabled:opacity-50">
           <Play className="h-4 w-4" /> {busy ? "Uploading and processing…" : "Upload and Start Pipeline"}
         </button>
