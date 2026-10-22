@@ -489,6 +489,6 @@ async def _publish_candidate(
         "output_path": target.silver_path,
         "row_count": target.row_count,
         "column_count": target.column_count,
-        "quality_score": checkpoint.get("quality_score"),
+        "quality_score": checkpoint.get("output_quality_score", checkpoint.get("quality_score")),
         "pii_masked": bool(checkpoint.get("pii_columns")),
     }
