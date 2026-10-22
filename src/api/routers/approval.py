@@ -1,4 +1,5 @@
 """Project-scoped human approval API for governed pipelines."""
+from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -150,7 +151,7 @@ async def reject_pipeline(
         "current_state": "rejected",
         "checkpoint_data": checkpoint,
         "error_message": decision.rationale,
-        "completed_at": __import__("datetime").datetime.now(__import__("datetime").UTC),
+        "completed_at": datetime.now(UTC),
     })
     await AuditLogRepository(session).log_action(
         action="HUMAN_APPROVAL_REJECTED",
