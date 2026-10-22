@@ -52,7 +52,8 @@ app.include_router(approval.router, prefix="/approvals", tags=["approvals"])
 app.include_router(chat.router, prefix="/chat", tags=["chat"])
 app.include_router(admin.router, prefix="/admin", tags=["admin"])
 app.include_router(lineage.router, prefix="/lineage", tags=["lineage"])
-app.include_router(datasets.router, prefix="/datasets", tags=["datasets"])\napp.include_router(pipelines.router, prefix="/pipelines", tags=["pipelines"])
+app.include_router(datasets.router, prefix="/datasets", tags=["datasets"])
+app.include_router(pipelines.router, prefix="/pipelines", tags=["pipelines"])
 
 
 @app.exception_handler(ValidationError)
