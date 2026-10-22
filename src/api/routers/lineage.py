@@ -45,7 +45,9 @@ async def dataset_lineage(
             UNION ALL
             SELECT l.source_dataset_id, l.target_dataset_id, l.transformation_type, l.agent_id, u.depth + 1
             FROM lineage l JOIN upstream u ON l.target_dataset_id = u.source_dataset_id
-            WHERE u.depth < 10
+            JOIN datasets source_ds ON source_ds.id = l.source_dataset_id
+            JOIN datasets target_ds ON target_ds.id = l.target_dataset_id
+            WHERE u.depth < 10 AND source_ds.project_id = :project_id AND target_ds.project_id = :project_id
         )
         SELECT * FROM upstream
         """
@@ -59,7 +61,9 @@ async def dataset_lineage(
             UNION ALL
             SELECT l.source_dataset_id, l.target_dataset_id, l.transformation_type, l.agent_id, d.depth + 1
             FROM lineage l JOIN downstream d ON l.source_dataset_id = d.target_dataset_id
-            WHERE d.depth < 10
+            JOIN datasets source_ds ON source_ds.id = l.source_dataset_id
+            JOIN datasets target_ds ON target_ds.id = l.target_dataset_id
+            WHERE d.depth < 10 AND source_ds.project_id = :project_id AND target_ds.project_id = :project_id
         )
         SELECT * FROM downstream
         """
@@ -130,7 +134,9 @@ async def lineage_impact(
             UNION ALL
             SELECT l.source_dataset_id, l.target_dataset_id, d.depth + 1
             FROM lineage l JOIN downstream d ON l.source_dataset_id = d.target_dataset_id
-            WHERE d.depth < 10
+            JOIN datasets s ON s.id = l.source_dataset_id
+            JOIN datasets t ON t.id = l.target_dataset_id
+            WHERE d.depth < 10 AND s.project_id = :project_id AND t.project_id = :project_id
         )
         SELECT target_dataset_id, depth FROM downstream
         """
