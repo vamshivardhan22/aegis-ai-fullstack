@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.agents.base import BaseAgent
 from src.agents.safe_transform import apply_transformation_plan
-from src.workflows.csv_pipeline import _detect_pii
+from src.workflows.csv_pipeline import _detect_pii, _profile
 from src.config import get_settings
 from src.core.exceptions import ValidationError
 from src.core.logging import configure_logging
@@ -50,7 +50,12 @@ class TransformAgent(BaseAgent):
             if not isinstance(output_name, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,99}", output_name) or ".." in output_name:
                 raise ValidationError("output_name must be a safe 1-100 character identifier")
             output_bytes = result.to_csv(index=False).encode("utf-8")
+            output_profile = _profile(result, output_bytes)
+            if output_profile["non_finite_cells"]:
+                raise ValidationError("Transformation produced non-finite numeric values")
             output_sha256 = hashlib.sha256(output_bytes).hexdigest()
+            output_profile["source_sha256"] = hashlib.sha256(source_bytes).hexdigest()
+            output_profile["output_sha256"] = output_sha256
             key = "silver/" + (source.project_id if source is not None else str(context.get("project_id", "unscoped"))) + "/" + uuid4().hex + ".csv"
             await self.store_artifact(key, output_bytes, "text/csv")
             dataset_id = ""
@@ -69,8 +74,16 @@ class TransformAgent(BaseAgent):
                     source_type="transformed",
                     silver_path=key,
                     schema_json=self._schema_json(result),
+                    profile_json={
+                        **output_profile,
+                        "masking_applied": bool((source.profile_json or {}).get("masking_applied")),
+                        "pii_columns": (source.profile_json or {}).get("pii_columns", {}),
+                    },
                     row_count=len(result),
                     column_count=len(result.columns),
+                    size_bytes=len(output_bytes),
+                    quality_score=output_profile["quality_score"],
+                    version=source.version + 1,
                 ))
                 edge = await lineage.create(Lineage(
                     source_dataset_id=context["source_dataset_id"],
