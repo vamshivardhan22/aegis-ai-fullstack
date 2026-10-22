@@ -18,7 +18,6 @@ services:
       AEGIS_STORAGE_BACKEND: minio
       AEGIS_MINIO_ENDPOINT: minio:9000
       AEGIS_MLFLOW_TRACKING_URI: http://mlflow:5000
-      AEGIS_OLLAMA_URL: http://ollama:11434
       AEGIS_QDRANT_URL: http://qdrant:6333
     depends_on:
       postgres:
@@ -106,16 +105,6 @@ services:
     networks:
       - aegis-network
 
-  ollama:
-    image: ollama/ollama:latest
-    container_name: aegis-ollama
-    ports:
-      - "11434:11434"
-    volumes:
-      - ollama-data:/root/.ollama
-    networks:
-      - aegis-network
-
   qdrant:
     image: qdrant/qdrant:latest
     container_name: aegis-qdrant
@@ -165,7 +154,6 @@ volumes:
   postgres-data:
   redis-data:
   minio-data:
-  ollama-data:
   qdrant-data:
   prometheus-data:
   grafana-data:
