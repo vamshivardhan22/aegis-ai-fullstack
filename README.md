@@ -44,8 +44,8 @@ The project is intentionally not autonomy without limits. It is autonomy with ex
 | Agent execution | Admin and Data Engineer users can execute registered agents through `/agents/{agent_type}/execute`. |
 | Human approval | Sensitive CSV outputs are staged, persisted as approval checkpoints, and published only after an authorized decision. Rejections do not publish. |
 | PII detection | The CSV workflow checks column-name hints and value patterns, masks detected fields before staging, and pauses for approval. The separate PII agent produces a full-file scan report and can write a masked artifact when explicitly requested. |
-| Transform lineage | Transform agent writes a derived CSV artifact, creates a dataset record, and records dataset-to-dataset lineage. |
-| RAG chat | Direct database answers are project-scoped; retrieval exposes only public documents or documents scoped to the requested project. In-memory vector fallback is development-only; production fails closed when Qdrant or embeddings are unavailable. |
+| Transform lineage | Governed pipeline, cleaning, feature engineering, PII masking, and transformation outputs create derived dataset records and dataset-to-dataset lineage. Published artifacts can be downloaded through an authorized API endpoint. |
+| RAG chat | Direct database answers are project-scoped; retrieval exposes only public documents or documents scoped to the requested project. Chat turns are persisted per user; in-memory vector fallback is development-only and production fails closed when Qdrant or embeddings are unavailable. |
 | Audit logging | Registration, login, dataset operations, agent decisions, approval decisions, admin actions, and retention events use audit records. |
 | Frontend | React command center. Pipeline list, retry, upload, and approval actions call real API endpoints; pipeline state refreshes from persisted backend records. Other dashboard/agent/monitoring surfaces still need individual verification. |
 | Deployment assets | Dockerfile, Docker Compose stack, and Kubernetes manifests are included and validated by CI/static checks. |
