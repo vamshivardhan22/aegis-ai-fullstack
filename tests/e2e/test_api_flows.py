@@ -53,9 +53,8 @@ async def test_complete_pipeline_flow(client: AsyncClient) -> None:
         headers=headers,
         json={"dataset_id": dataset_id, "cleaning_options": {"trim_strings": True, "drop_duplicates": True}},
     )
-    assert cleaning.status_code == 200
-    assert cleaning.json()["rows_before"] == 2
-    assert cleaning.json()["rows_after"] == 2
+    assert cleaning.status_code == 422
+    assert "governed pipeline" in cleaning.json()["detail"]["message"]
     features = await client.post(
         "/agents/features/execute",
         headers=headers,
@@ -235,6 +234,15 @@ async def test_features_agent_persists_output_and_lineage_for_non_sensitive_data
     )
     assert created.status_code == 200, created.text
     dataset_id = created.json()["id"]
+    cleaning = await client.post(
+        "/agents/cleaning/execute",
+        headers=headers,
+        json={"dataset_id": dataset_id, "cleaning_options": {"trim_strings": True, "drop_duplicates": True}},
+    )
+    assert cleaning.status_code == 200, cleaning.text
+    assert cleaning.json()["rows_before"] == 2
+    assert cleaning.json()["rows_after"] == 2
+    assert cleaning.json()["output_dataset_id"]
     response = await client.post(
         "/agents/features/execute",
         headers=headers,
