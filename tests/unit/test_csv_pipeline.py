@@ -44,3 +44,11 @@ def test_profile_records_nulls_duplicates_and_checksum() -> None:
     assert profile["duplicate_rows"] == 1
     assert len(profile["source_sha256"]) == 64
     assert 0 <= profile["quality_score"] <= 1
+
+
+def test_profile_detects_non_finite_numeric_values() -> None:
+    frame = pd.DataFrame({"amount": [10.0, float("inf"), 5.0]})
+    profile = _profile(frame, b"amount\n10\ninf\n5\n")
+    assert profile["non_finite_cells"] == 1
+    assert profile["non_finite_counts"]["amount"] == 1
+    assert profile["quality_score"] < 1.0
