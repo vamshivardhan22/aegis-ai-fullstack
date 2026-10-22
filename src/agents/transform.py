@@ -41,6 +41,8 @@ class TransformAgent(BaseAgent):
             generated = await self._generate_transformation(context, schema)
             plan = generated["plan"]
             result = apply_transformation_plan(df, plan)
+            if result.empty:
+                raise ValidationError("Transformation produced zero rows")
             key = "silver/" + str(context["output_name"]) + ".csv"
             await self.store_artifact(key, result.to_csv(index=False).encode(), "text/csv")
             dataset_id = ""
