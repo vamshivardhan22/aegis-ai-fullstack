@@ -40,8 +40,9 @@ async def test_complete_pipeline_flow(client: AsyncClient) -> None:
         json={"dataset_id": dataset_id, "artifact": dataset.json()["bronze_path"]},
     )
     assert ingestion.status_code == 200
-    ml = await client.post("/agents/ml/execute", headers=headers, json={"dataset_id": dataset_id})
-    assert ml.status_code == 200
+    quality = await client.post("/agents/quality/execute", headers=headers, json={"dataset_id": dataset_id})
+    assert quality.status_code == 200
+    assert quality.json()["quality_score"] >= 0.9
     pii = await client.post(
         "/agents/pii/execute",
         headers=headers,
