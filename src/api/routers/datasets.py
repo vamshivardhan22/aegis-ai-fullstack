@@ -199,7 +199,7 @@ async def list_datasets(
             "source_type": item.source_type,
             "row_count": item.row_count,
             "column_count": item.column_count,
-            "quality_score": item.quality_score,
+            "quality_score": item.quality_score,\n            "has_bronze_artifact": bool(item.bronze_path),
         } for item in datasets
     ]}
 
