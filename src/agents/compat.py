@@ -103,7 +103,11 @@ class CompatibilityAgent(BaseAgent):
         if x.empty or x.isna().any().any():
             raise ValidationError("Features are empty or contain missing values")
         y = frame[target]
-        classification = pd.api.types.is_object_dtype(y) or pd.api.types.is_bool_dtype(y)
+        classification = (
+            pd.api.types.is_object_dtype(y)
+            or pd.api.types.is_bool_dtype(y)
+            or (pd.api.types.is_integer_dtype(y) and y.nunique() <= max(20, int(len(y) * 0.1)))
+        )
         if classification and y.nunique() < 2:
             raise ValidationError("Classification requires at least two classes")
         x_train, x_test, y_train, y_test = train_test_split(x, y, test_size=.2, random_state=42)
