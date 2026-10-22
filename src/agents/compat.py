@@ -90,7 +90,7 @@ class CompatibilityAgent(BaseAgent):
             await self.store_artifact(key, data, "text/csv")
             output_name = f"{dataset.name}-{self.name}"
             existing = await self.db_repo.execute(
-                select(Dataset).where(Dataset.project_id == dataset.project_id, Dataset.name == output_name)
+                select(Dataset).where(Dataset.project_id == dataset.project_id, Dataset.name == output_name, Dataset.source_type == "transformed")
             )
             target = existing.scalar_one_or_none()
             values = {
