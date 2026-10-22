@@ -1,47 +1,79 @@
 import { useCallback, useEffect, useState } from "react";
-import { addMinutes, formatDistanceToNow } from "date-fns";
-import { pipelineSocket } from "../lib/websocket.js";
+import { formatDistanceToNow } from "date-fns";
+import { createPipeline as createPipelineRequest, listPipelines, resumePipeline } from "../lib/api.js";
 
-const statuses = ["running", "completed", "failed", "approval_required", "pending"];
-const fallbackPipelines = Array.from({ length: 8 }, (_, index) => ({
-  id: `PL-${142 - index}`,
-  name: ["Fraud Model Refresh", "Revenue Mart Sync", "Churn Features", "Claims Enrichment"][index % 4],
-  dataset: ["transactions_q3.csv", "revenue_gold.parquet", "customer_events.json", "claims_raw.xlsx"][index % 4],
-  status: statuses[index % statuses.length],
-  progress: [68, 100, 32, 88, 12][index % 5],
-  started: formatDistanceToNow(addMinutes(new Date(), -18 - index * 14), { addSuffix: true })
-}));
+function toViewModel(pipeline) {
+  const startedAt = pipeline.started_at || pipeline.created_at;
+  let started = "Not started";
+  if (startedAt) {
+    const date = new Date(startedAt);
+    if (!Number.isNaN(date.getTime())) started = formatDistanceToNow(date, { addSuffix: true });
+  }
+  return {
+    ...pipeline,
+    id: pipeline.id,
+    dataset: pipeline.dataset || pipeline.dataset_id || "Unknown dataset",
+    status: pipeline.status || "pending",
+    progress: Number.isFinite(pipeline.progress) ? pipeline.progress : 0,
+    started,
+    checkpoint: pipeline.checkpoint || {}
+  };
+}
 
 export function usePipelines() {
-  const [pipelines, setPipelines] = useState(fallbackPipelines);
-  const [loading, setLoading] = useState(false);
+  const [pipelines, setPipelines] = useState([]);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [wsStatus, setWsStatus] = useState("idle");
+  const [busyId, setBusyId] = useState(null);
 
   const refresh = useCallback(async () => {
     setLoading(true);
     try {
-      setPipelines(fallbackPipelines);
+      const data = await listPipelines();
+      setPipelines(data.map(toViewModel));
       setError("");
     } catch (err) {
-      setError(err.message);
+      setError(err.response?.data?.detail || err.message || "Unable to load pipelines.");
     } finally {
       setLoading(false);
     }
   }, []);
 
-  useEffect(() => { refresh(); }, [refresh]);
   useEffect(() => {
-    const url = `${import.meta.env.VITE_WS_URL || "ws://localhost:8000"}/ws/pipelines`;
-    pipelineSocket.connect(url, (event) => {
-      if (event?.id) setPipelines((current) => current.map((pipeline) => pipeline.id === event.id ? { ...pipeline, ...event } : pipeline));
-    }, setWsStatus);
-    return () => pipelineSocket.disconnect();
-  }, []);
+    refresh();
+    const interval = window.setInterval(refresh, 15000);
+    return () => window.clearInterval(interval);
+  }, [refresh]);
 
-  const createPipeline = (pipeline) => setPipelines((current) => [{ ...pipeline, id: `PL-${Date.now()}`, status: "pending", progress: 0, started: "now" }, ...current]);
-  const retry = (id) => setPipelines((current) => current.map((pipeline) => pipeline.id === id ? { ...pipeline, status: "running", progress: 18 } : pipeline));
-  const getPipeline = (id) => pipelines.find((pipeline) => pipeline.id === id);
+  const createPipeline = useCallback(async (payload) => {
+    setBusyId("create");
+    try {
+      await createPipelineRequest(payload);
+      await refresh();
+      return true;
+    } catch (err) {
+      setError(err.response?.data?.detail || err.message || "Unable to start pipeline.");
+      return false;
+    } finally {
+      setBusyId(null);
+    }
+  }, [refresh]);
 
-  return { pipelines, loading, error, wsStatus, createPipeline, getPipeline, retry, refresh };
+  const retry = useCallback(async (id) => {
+    setBusyId(id);
+    try {
+      await resumePipeline(id);
+      await refresh();
+      return true;
+    } catch (err) {
+      setError(err.response?.data?.detail || err.message || "Unable to resume pipeline.");
+      return false;
+    } finally {
+      setBusyId(null);
+    }
+  }, [refresh]);
+
+  const getPipeline = useCallback((id) => pipelines.find((pipeline) => pipeline.id === id), [pipelines]);
+
+  return { pipelines, loading, error, busyId, createPipeline, getPipeline, retry, refresh };
 }
