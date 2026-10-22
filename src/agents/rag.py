@@ -298,13 +298,16 @@ async def ingest_alert(session: AsyncSession, alert_payload: dict[str, Any]) -> 
 async def ingest_human_decision(session: AsyncSession, pipeline_id: str, decision: dict[str, Any]) -> None:
     """Auto-ingest human approval or rejection decisions."""
 
+    pipeline = await session.get(Pipeline, pipeline_id)
+    if pipeline is None:
+        return
     agent = RAGKnowledgeAgent("rag", _NoopLLM(), session, None)
     await agent.execute(
         {
             "action": "ingest",
             "doc_type": "manual",
             "content": str(decision),
-            "metadata": {"pipeline_id": pipeline_id, "event": "human_decision"},
+            "metadata": {"pipeline_id": pipeline_id, "project_id": pipeline.project_id, "event": "human_decision"},
             "title": f"Human decision for {pipeline_id}",
         }
     )
