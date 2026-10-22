@@ -404,20 +404,28 @@ async def _publish_candidate(
     name = f"{source.name}-run-{pipeline.id[:8]}"
     result = await session.execute(select(Dataset).where(Dataset.project_id == pipeline.project_id, Dataset.name == name))
     target = result.scalar_one_or_none()
+    dataset_values = {
+        "silver_path": candidate_path,
+        "schema_json": checkpoint.get("output_schema"),
+        "profile_json": {**(checkpoint.get("profile") or {}), "output_sha256": checkpoint.get("output_sha256")},
+        "row_count": checkpoint.get("output_row_count"),
+        "column_count": checkpoint.get("output_column_count"),
+        "size_bytes": len(output_bytes),
+        "quality_score": checkpoint.get("quality_score"),
+        "version": source.version + 1,
+    }
     if target is None:
         target = await DatasetRepository(session).create(Dataset(
             project_id=pipeline.project_id,
             name=name,
             source_type="transformed",
-            silver_path=candidate_path,
-            schema_json=checkpoint.get("output_schema"),
-            profile_json={**(checkpoint.get("profile") or {}), "output_sha256": checkpoint.get("output_sha256")},
-            row_count=checkpoint.get("output_row_count"),
-            column_count=checkpoint.get("output_column_count"),
-            size_bytes=len(output_bytes),
-            quality_score=checkpoint.get("quality_score"),
-            version=source.version + 1,
+            **dataset_values,
         ))
+    else:
+        await DatasetRepository(session).update(target.id, dataset_values)
+        target = await DatasetRepository(session).get_by_id(target.id)
+        if target is None:
+            raise ValueError("Published dataset disappeared during idempotent recovery")
     edge_query = await session.execute(select(Lineage).where(
         Lineage.source_dataset_id == source.id, Lineage.target_dataset_id == target.id
     ))
