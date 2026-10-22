@@ -12,7 +12,7 @@ from src.agents.explain import ExplainAgent
 from src.agents.monitor import MonitorAgent
 from src.agents.pii import PIIDetectionAgent
 from src.agents.transform import TransformAgent
-from src.core.exceptions import AgentError, HumanApprovalRequired
+from src.core.exceptions import AegisError, AgentError, HumanApprovalRequired
 from src.core.security import get_current_user, require_role
 from src.core.tenancy import require_dataset_access, require_dataset_path_access
 from src.database.models import User, UserRole
@@ -96,7 +96,7 @@ async def execute_agent(
         return await agent.execute(context)
     except HumanApprovalRequired as exc:
         raise HTTPException(status_code=status.HTTP_202_ACCEPTED, detail=exc.to_dict()) from exc
-    except AgentError as exc:
-        raise HTTPException(status_code=500, detail=exc.to_dict()) from exc
+    except AegisError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.to_dict()) from exc
     finally:
         await llm_client.close()
