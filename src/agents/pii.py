@@ -5,16 +5,16 @@ import hmac
 import io
 import json
 import re
-from typing import Any
+from typing import Any\nfrom uuid import uuid4
 
 import pandas as pd
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.agents.base import BaseAgent
+from src.agents.base import BaseAgent\nfrom src.core.exceptions import AgentError, ValidationError
 from src.config import get_settings
 from src.core.logging import configure_logging
-from src.database.models import Alert, AlertSeverity
-from src.database.repository import AlertRepository
+from src.database.models import Alert, AlertSeverity, Dataset, Lineage
+from src.database.repository import AlertRepository, DatasetRepository, LineageRepository
 
 settings = get_settings()
 logger = configure_logging(settings.AEGIS_DEBUG)
@@ -48,7 +48,18 @@ class PIIDetectionAgent(BaseAgent):
         """Scan a CSV sample for PII."""
 
         try:
-            raw_data = await self.storage.read(context["data_sample_path"])
+            dataset_id = context.get("dataset_id")
+            artifact_path = context.get("data_sample_path")
+            if not isinstance(dataset_id, str) or not isinstance(artifact_path, str):
+                raise ValidationError("dataset_id and data_sample_path are required")
+            source_dataset = None
+            if isinstance(self.db_repo, AsyncSession):
+                source_dataset = await DatasetRepository(self.db_repo).get_by_id(dataset_id)
+                if source_dataset is None or artifact_path not in {
+                    source_dataset.bronze_path, source_dataset.silver_path, source_dataset.gold_path
+                }:
+                    raise ValidationError("Dataset artifact is not accessible")
+            raw_data = await self.storage.read(artifact_path)
             if len(raw_data) > 50 * 1024 * 1024:
                 return {"pii_failed": True, "error": "PII scan input exceeds the 50 MiB scan limit."}
             df = pd.read_csv(io.BytesIO(raw_data))
@@ -86,8 +97,41 @@ class PIIDetectionAgent(BaseAgent):
                     masked[column] = masked[column].map(
                         lambda value: value if pd.isna(value) else self._mask_value(str(value), strategy)
                     )
-                masked_output_path = f"masked/{context['dataset_id']}.csv"
-                await self.store_artifact(masked_output_path, masked.to_csv(index=False).encode("utf-8"), "text/csv")
+                if source_dataset is None or not isinstance(self.db_repo, AsyncSession):
+                    raise ValidationError("Database-backed dataset metadata is required to publish a masked dataset")
+                masked_bytes = masked.to_csv(index=False).encode("utf-8")
+                masked_output_path = f"masked/{source_dataset.project_id}/{uuid4().hex}.csv"
+                await self.store_artifact(masked_output_path, masked_bytes, "text/csv")
+                output_schema = {str(column): str(dtype) for column, dtype in masked.dtypes.items()}
+                pii_columns = {item["name"]: item["pii_type"] for item in report_columns}
+                masked_profile = {
+                    "masking_applied": bool(report_columns),
+                    "pii_columns": pii_columns,
+                    "source_sha256": hashlib.sha256(raw_data).hexdigest(),
+                    "output_sha256": hashlib.sha256(masked_bytes).hexdigest(),
+                    "row_count": int(len(masked)),
+                    "column_count": int(len(masked.columns)),
+                }
+                masked_dataset = await DatasetRepository(self.db_repo).create(Dataset(
+                    project_id=source_dataset.project_id,
+                    name=f"{source_dataset.name}-masked-{uuid4().hex[:8]}",
+                    source_type="transformed",
+                    silver_path=masked_output_path,
+                    schema_json=output_schema,
+                    profile_json=masked_profile,
+                    row_count=len(masked),
+                    column_count=len(masked.columns),
+                    size_bytes=len(masked_bytes),
+                    quality_score=source_dataset.quality_score,
+                    version=source_dataset.version + 1,
+                ))
+                await LineageRepository(self.db_repo).create(Lineage(
+                    source_dataset_id=source_dataset.id,
+                    target_dataset_id=masked_dataset.id,
+                    transformation_type="pii_masking",
+                    agent_id=self.name,
+                    config_json={"pii_columns": pii_columns, "source_sha256": masked_profile["source_sha256"]},
+                ))
             if report_columns and isinstance(self.db_repo, AsyncSession):
                 await AlertRepository(self.db_repo).create(
                     Alert(
@@ -110,11 +154,16 @@ class PIIDetectionAgent(BaseAgent):
                 "rows_scanned": int(len(df)),
                 "scan_coverage": "full_dataset",
                 "masked_output_path": masked_output_path,
-                "masking_applied": masked_output_path is not None,
+                "masked_dataset_id": masked_dataset.id if masked_output_path and source_dataset is not None else None,
+                "masking_applied": bool(report_columns) and masked_output_path is not None,
             }
+        except ValidationError:
+            raise
+        except AgentError:
+            raise
         except Exception as exc:
             logger.error("pii_agent_failed", error=str(exc))
-            return {"pii_failed": True, "error": "Unable to complete PII scan."}
+            raise AgentError("Unable to complete PII scan.") from exc
 
     async def _score_column(self, column: str, series: pd.Series) -> tuple[str, float]:
         """Score a column using name heuristics, regexes, spaCy, and optional LLM fallback."""
