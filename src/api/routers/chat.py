@@ -1,5 +1,4 @@
-"""Project-scoped chat API with per-user ephemeral history."""
-from datetime import datetime
+"""Project-scoped chat API with persisted per-user history."""
 from typing import Any
 
 from fastapi import APIRouter, Depends
@@ -10,13 +9,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.agents.rag import RAGKnowledgeAgent
 from src.core.security import get_current_user
 from src.core.tenancy import require_project_access
-from src.database.models import Dataset, Pipeline, Project, User, UserRole
+from src.database.models import ChatMessage, Dataset, Pipeline, Project, User, UserRole
 from src.database.session import get_async_session
 from src.llm.client import LLMClient
 from src.storage import get_storage
 
 router = APIRouter()
-CHAT_HISTORY: dict[str, list[dict[str, Any]]] = {}
 
 
 class ChatQuestion(BaseModel):
@@ -32,7 +30,7 @@ async def ask_chat(
     session: AsyncSession = Depends(get_async_session),
     current_user: User = Depends(get_current_user),
 ) -> dict[str, Any]:
-    """Answer a question from facts the caller is authorized to access."""
+    """Answer from authorized facts and persist the resulting conversation turn."""
     if payload.project_id:
         await require_project_access(session, current_user, payload.project_id)
     direct = await _answer_from_database(payload, session, current_user)
@@ -50,21 +48,40 @@ async def ask_chat(
             })
         finally:
             await llm.close()
-    history = CHAT_HISTORY.setdefault(current_user.id, [])
-    history.append({
-        "question": payload.question,
-        "response": response,
-        "project_id": payload.project_id,
-        "created_at": datetime.utcnow().isoformat(),
-    })
-    del history[:-50]
+    message = ChatMessage(
+        user_id=current_user.id,
+        project_id=payload.project_id,
+        question=payload.question,
+        response_json=response,
+    )
+    session.add(message)
+    await session.commit()
     return response
 
 
 @router.get("/history")
-async def chat_history(current_user: User = Depends(get_current_user)) -> dict[str, list[dict[str, Any]]]:
-    """Return only this user's recent in-process chat interactions."""
-    return {"history": CHAT_HISTORY.get(current_user.id, [])[-50:]}
+async def chat_history(
+    project_id: str | None = None,
+    session: AsyncSession = Depends(get_async_session),
+    current_user: User = Depends(get_current_user),
+) -> dict[str, list[dict[str, Any]]]:
+    """Return this user's recent persisted chat turns, optionally for one authorized project."""
+    if project_id:
+        await require_project_access(session, current_user, project_id)
+    query = select(ChatMessage).where(ChatMessage.user_id == current_user.id)
+    if project_id:
+        query = query.where(ChatMessage.project_id == project_id)
+    result = await session.execute(query.order_by(ChatMessage.created_at.desc()).limit(50))
+    messages = list(reversed(result.scalars().all()))
+    return {"history": [
+        {
+            "question": message.question,
+            "response": message.response_json,
+            "project_id": message.project_id,
+            "created_at": message.created_at.isoformat() if message.created_at else None,
+        }
+        for message in messages
+    ]}
 
 
 async def _answer_from_database(
