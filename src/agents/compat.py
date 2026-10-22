@@ -13,8 +13,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.agents.base import BaseAgent
 from src.agents.safe_transform import apply_transformation_plan
 from src.core.exceptions import ValidationError
-from src.database.models import Dataset, Lineage
-from src.database.repository import DatasetRepository, LineageRepository
+from src.database.models import Dataset, Lineage, Model, ModelStatus
+from src.database.repository import DatasetRepository, LineageRepository, ModelRepository
 
 
 class CompatibilityAgent(BaseAgent):
@@ -80,7 +80,7 @@ class CompatibilityAgent(BaseAgent):
             target = context.get("target_column")
             if not isinstance(target, str) or target not in frame.columns:
                 return {"agent": self.name, "status": "needs_configuration", "required_input": "target_column", "available_columns": list(frame.columns)}
-            return await self._baseline(frame, target)
+            return await self._baseline(dataset, frame, target)
         else:
             raise ValidationError("Unsupported deterministic stage", {"agent": self.name})
         if self.name in {"cleaning", "features"}:
@@ -132,7 +132,7 @@ class CompatibilityAgent(BaseAgent):
         await self.log_decision(f"{self.name.upper()}_EXECUTED", f"Executed deterministic {self.name} operation", 1.0)
         return {"agent": self.name, "dataset_id": dataset.id, **result}
 
-    async def _baseline(self, frame: pd.DataFrame, target: str) -> dict[str, Any]:
+    async def _baseline(self, dataset: Dataset, frame: pd.DataFrame, target: str) -> dict[str, Any]:
         if len(frame) < 10 or frame[target].isna().any():
             raise ValidationError("Model evaluation needs at least 10 rows and a non-null target")
         from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
@@ -154,4 +154,25 @@ class CompatibilityAgent(BaseAgent):
         model.fit(x_train, y_train)
         pred = model.predict(x_test)
         metrics = {"accuracy": float(accuracy_score(y_test, pred)), "f1_weighted": float(f1_score(y_test, pred, average="weighted", zero_division=0))} if classification else {"mae": float(mean_absolute_error(y_test, pred)), "rmse": float(mean_squared_error(y_test, pred) ** .5)}
-        return {"agent": self.name, "status": "completed", "task": "classification" if classification else "regression", "target_column": target, "train_rows": len(x_train), "test_rows": len(x_test), "metrics": metrics, "note": "Evaluation only; this endpoint does not persist a model artifact."}
+        import joblib
+        from io import BytesIO
+
+        task = "classification" if classification else "regression"
+        artifact = BytesIO()
+        joblib.dump({"model": model, "feature_columns": list(x.columns), "target_column": target, "metrics": metrics}, artifact)
+        artifact_path = f"models/{dataset.project_id}/{dataset.id}/baseline-{hashlib.sha256(artifact.getvalue()).hexdigest()[:12]}.joblib"
+        await self.store_artifact(artifact_path, artifact.getvalue(), "application/octet-stream")
+        record = await ModelRepository(self.db_repo).create(Model(
+            dataset_id=dataset.id,
+            name=f"{dataset.name}-baseline",
+            algorithm="RandomForestClassifier" if classification else "RandomForestRegressor",
+            problem_type=task,
+            metrics_json=metrics,
+            parameters_json={"random_state": 42, "n_estimators": 100, "train_rows": len(x_train), "test_rows": len(x_test), "target_column": target, "feature_columns": list(x.columns)},
+            artifact_path=artifact_path,
+            status=ModelStatus.STAGING,
+            is_active=True,
+        ))
+        report = {"model_id": record.id, "model_path": artifact_path, "task": task, "target_column": target, "train_rows": len(x_train), "test_rows": len(x_test), "metrics": metrics}
+        await self.store_artifact(f"reports/{dataset.project_id}/{dataset.id}/model-{record.id}.json", json.dumps(report, indent=2).encode(), "application/json")
+        return {"agent": self.name, "status": "completed", **report}
