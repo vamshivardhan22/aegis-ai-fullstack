@@ -4,26 +4,36 @@ export const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
 const api = axios.create({ baseURL: API_URL, timeout: 10000 });
 
-export async function registerAccount({ email, password, full_name, role }) {
-  const { data } = await api.post("/auth/register", { email, password, full_name, role });
-  return data;
-}
-
-export async function uploadDataset(file) {
-  const form = new FormData();
-  form.append("file", file);
-  form.append("name", file.name);
-  const { data } = await api.post("/datasets/upload", form);
-  return data;
-}
-
 export async function listPipelines() {
   const { data } = await api.get("/pipelines/");
+  return data.pipelines || [];
+}
+
+export async function createPipeline({ dataset_id, name, config = {} }) {
+  const { data } = await api.post("/pipelines/", { dataset_id, name, config }, { timeout: 120000 });
   return data;
 }
 
-export async function createPipeline({ dataset_id, name, config }) {
-  const { data } = await api.post("/pipelines/", { dataset_id, name, config });
+export async function resumePipeline(pipelineId) {
+  const { data } = await api.post(`/pipelines/${encodeURIComponent(pipelineId)}/resume`, {}, { timeout: 120000 });
+  return data;
+}
+
+export async function uploadDataset(file, name = file.name.replace(/\.csv$/i, "")) {
+  const form = new FormData();
+  form.append("file", file);
+  form.append("name", name);
+  const { data } = await api.post("/datasets/upload", form, { timeout: 60000 });
+  return data;
+}
+
+export async function listDatasets(projectId) {
+  const { data } = await api.get("/datasets/", { params: projectId ? { project_id: projectId } : {} });
+  return data.datasets || [];
+}
+
+export async function registerAccount({ email, password, full_name, role }) {
+  const { data } = await api.post("/auth/register", { email, password, full_name, role });
   return data;
 }
 
