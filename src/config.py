@@ -3,7 +3,7 @@
 from functools import lru_cache
 from typing import Literal, Optional
 
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -59,6 +59,28 @@ class Settings(BaseSettings):
     AEGIS_MAX_RETRIES: int = 3
     AEGIS_RETRY_DELAY_SECONDS: int = 5
     AEGIS_HUMAN_APPROVAL_RISK_THRESHOLD: float = 0.7
+
+    @model_validator(mode="after")
+    def validate_production_security(self) -> "Settings":
+        """Refuse insecure or ephemeral defaults when explicitly running in production."""
+        if self.AEGIS_ENV != "production":
+            return self
+        problems: list[str] = []
+        if self.AEGIS_SECRET_KEY == "change-me-in-production" or len(self.AEGIS_SECRET_KEY) < 32:
+            problems.append("AEGIS_SECRET_KEY must be a unique secret of at least 32 characters")
+        if self.AEGIS_DEBUG:
+            problems.append("AEGIS_DEBUG must be false in production")
+        if not self.is_postgres:
+            problems.append("AEGIS_DB_URL must use PostgreSQL in production")
+        if self.AEGIS_STORAGE_BACKEND == "local":
+            problems.append("AEGIS_STORAGE_BACKEND must use durable shared storage in production")
+        if self.AEGIS_CORS_ORIGIN_REGEX:
+            problems.append("AEGIS_CORS_ORIGIN_REGEX must be unset in production")
+        if any("localhost" in origin or "127.0.0.1" in origin for origin in self.cors_origins):
+            problems.append("AEGIS_CORS_ORIGINS must not include localhost in production")
+        if problems:
+            raise ValueError("Unsafe production configuration: " + "; ".join(problems))
+        return self
 
     @property
     def is_postgres(self) -> bool:
