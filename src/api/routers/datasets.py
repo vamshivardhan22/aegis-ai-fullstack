@@ -56,8 +56,8 @@ def _profile_csv(data: bytes) -> tuple[dict[str, str], dict[str, Any], int, int]
         raise HTTPException(status_code=422, detail="CSV exceeds the 500-column limit")
     schema = {str(column): str(dtype) for column, dtype in frame.dtypes.items()}
     profile = {
-        "row_count": int(len(frame)),
-        "column_count": int(len(frame.columns)),
+        "row_count": len(frame),
+        "column_count": len(frame.columns),
         "null_counts": {str(column): int(count) for column, count in frame.isna().sum().items()},
         "duplicate_rows": int(frame.duplicated().sum()),
         "sha256": hashlib.sha256(data).hexdigest(),
