@@ -99,7 +99,7 @@ def apply_transformation_plan(frame: pd.DataFrame, plan: dict[str, Any]) -> pd.D
             result.loc[:, columns] = result.loc[:, columns].fillna(operation["value"])
         elif op == "filter":
             column, operator = operation.get("column"), operation.get("operator")
-            if not isinstance(column, str) or operator not in _ALLOWED_FILTERS:
+            if not isinstance(column, str) or not isinstance(operator, str) or operator not in _ALLOWED_FILTERS:
                 raise ValidationError("filter uses an unsupported column or operator", {"step": index})
             _require_columns(result, [column])
             try:
@@ -113,7 +113,7 @@ def apply_transformation_plan(frame: pd.DataFrame, plan: dict[str, Any]) -> pd.D
             if not isinstance(aggregations, dict) or not aggregations:
                 raise ValidationError("groupby_agg requires an aggregation mapping", {"step": index})
             _require_columns(result, groups + list(aggregations))
-            if not all(isinstance(column, str) and aggregation in _ALLOWED_AGGREGATIONS for column, aggregation in aggregations.items()):
+            if not all(isinstance(column, str) and isinstance(aggregation, str) and aggregation in _ALLOWED_AGGREGATIONS for column, aggregation in aggregations.items()):
                 raise ValidationError("groupby_agg contains an unsupported aggregation", {"step": index})
             result = result.groupby(groups, dropna=False, as_index=False).agg(aggregations)
         elif op == "cast":
@@ -122,7 +122,7 @@ def apply_transformation_plan(frame: pd.DataFrame, plan: dict[str, Any]) -> pd.D
                 raise ValidationError("cast requires a column-to-type mapping", {"step": index})
             _require_columns(result, list(columns))
             for column, dtype in columns.items():
-                if dtype not in _ALLOWED_DTYPES:
+                if not isinstance(dtype, str) or dtype not in _ALLOWED_DTYPES:
                     raise ValidationError("cast uses an unsupported dtype", {"step": index, "dtype": dtype})
                 try:
                     if dtype == "string":
@@ -147,7 +147,7 @@ def apply_transformation_plan(frame: pd.DataFrame, plan: dict[str, Any]) -> pd.D
             left_column, operator = operation.get("left"), operation.get("operator")
             right_column = operation.get("right_column")
             has_value = "value" in operation
-            if not isinstance(left_column, str) or operator not in _ALLOWED_NUMERIC_DERIVATIONS:
+            if not isinstance(left_column, str) or not isinstance(operator, str) or operator not in _ALLOWED_NUMERIC_DERIVATIONS:
                 raise ValidationError("derive_numeric requires a source column and supported operator", {"step": index})
             if (right_column is None) == (not has_value):
                 raise ValidationError("derive_numeric requires exactly one of right_column or value", {"step": index})
@@ -179,7 +179,7 @@ def apply_transformation_plan(frame: pd.DataFrame, plan: dict[str, Any]) -> pd.D
         elif op == "derive_string":
             name = _new_column_name(result, operation.get("name"))
             source, action = operation.get("column"), operation.get("operation")
-            if not isinstance(source, str) or action not in _ALLOWED_STRING_DERIVATIONS:
+            if not isinstance(source, str) or not isinstance(action, str) or action not in _ALLOWED_STRING_DERIVATIONS:
                 raise ValidationError("derive_string uses an unsupported source or operation", {"step": index})
             _require_columns(result, [source])
             series = result[source].astype("string")
@@ -194,7 +194,7 @@ def apply_transformation_plan(frame: pd.DataFrame, plan: dict[str, Any]) -> pd.D
         elif op == "derive_datetime":
             name = _new_column_name(result, operation.get("name"))
             source, part = operation.get("column"), operation.get("part")
-            if not isinstance(source, str) or part not in _ALLOWED_DATE_PARTS:
+            if not isinstance(source, str) or not isinstance(part, str) or part not in _ALLOWED_DATE_PARTS:
                 raise ValidationError("derive_datetime uses an unsupported source or date part", {"step": index})
             _require_columns(result, [source])
             try:
