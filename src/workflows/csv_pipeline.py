@@ -346,7 +346,7 @@ async def run_csv_pipeline(pipeline_id: str, actor_id: str | None = None) -> dic
                 "message": "Existing execution state returned; duplicate execution was not started.",
             }
         if pipeline.status == PipelineStatus.FAILED:
-            raise HTTPException(status_code=409, detail="Failed pipelines must be explicitly reset before retry")
+            raise HTTPException(status_code=409, detail="Failed pipelines cannot be rerun; create a new pipeline run")
         state: CSVWorkflowState = {"pipeline_id": pipeline.id, "actor_id": actor_id, "stage": "queued"}
         await PipelineRepository(session).update(
             pipeline.id,
