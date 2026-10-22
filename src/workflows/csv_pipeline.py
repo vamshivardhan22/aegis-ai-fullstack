@@ -153,7 +153,7 @@ async def run_csv_pipeline(pipeline_id: str, actor_id: str | None = None) -> dic
             frame = pd.read_csv(io.BytesIO(raw))
         except (pd.errors.ParserError, UnicodeDecodeError, ValueError) as exc:
             raise ValueError("Source artifact is not a valid UTF-8 CSV") from exc
-        if len(frame.columns) == 0 or len(frame.columns) > MAX_PIPELINE_COLUMNS:
+        if frame.empty:\n            raise ValueError("CSV contains a header but no data rows")\n        if len(frame.columns) == 0 or len(frame.columns) > MAX_PIPELINE_COLUMNS:
             raise ValueError("CSV must contain between 1 and 500 columns")
         if frame.columns.duplicated().any():
             raise ValueError("CSV contains duplicate column names")
@@ -173,7 +173,7 @@ async def run_csv_pipeline(pipeline_id: str, actor_id: str | None = None) -> dic
             }},
         )
         await _audit(session, pipeline, actor_id, "PIPELINE_STAGE_COMPLETED", {"stage": "profile", "profile": profile})
-        minimum_quality = float(config.get("minimum_quality_score", 0.0))
+        minimum_quality = float(config.get("minimum_quality_score", 0.6))
         if not 0 <= minimum_quality <= 1:
             raise ValueError("minimum_quality_score must be between 0 and 1")
         if profile["quality_score"] < minimum_quality:
@@ -203,7 +203,7 @@ async def run_csv_pipeline(pipeline_id: str, actor_id: str | None = None) -> dic
             "output_schema": output_schema,
             "output_row_count": int(len(transformed)),
             "output_column_count": int(len(transformed.columns)),
-            "output_size_bytes": len(output_bytes),
+            "output_size_bytes": len(output_bytes),\n            "output_sha256": hashlib.sha256(output_bytes).hexdigest(),
             "profile": profile,
             "quality_score": profile["quality_score"],
             "pii_columns": pii_columns,
