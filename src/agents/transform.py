@@ -112,7 +112,16 @@ class TransformAgent(BaseAgent):
             return {"transform_failed": True, "error": "Unable to execute requested transformation."}
 
     async def _generate_transformation(self, context: dict[str, Any], schema: dict[str, Any]) -> dict[str, Any]:
-        """Ask the LLM for a JSON plan; use a safe no-op fallback if unavailable."""
+        """Use an explicit plan when supplied; otherwise request a constrained plan from the LLM."""
+        provided_plan = context.get("transformation_plan")
+        if provided_plan is not None:
+            if not isinstance(provided_plan, dict):
+                raise ValidationError("transformation_plan must be a declarative plan object")
+            return {
+                "plan": provided_plan,
+                "explanation": "Applied caller-supplied declarative transformation plan.",
+                "output_columns": list(schema),
+            }
         prompt = (
             "Return JSON only with keys plan, explanation, output_columns. "
             "plan must contain an operations list with at most 25 allow-listed steps. "
@@ -148,11 +157,22 @@ class TransformAgent(BaseAgent):
                     "explanation": f"Grouped rows by {group_col} and summed {sum_col}.",
                     "output_columns": [group_col, sum_col],
                 }
-            return {
-                "plan": {"operations": []},
-                "explanation": "Copied source data unchanged.",
-                "output_columns": list(schema),
-            }
+            if "drop duplicate" in request or "remove duplicate" in request or "deduplicate" in request:
+                return {
+                    "plan": {"operations": [{"op": "drop_duplicates"}]},
+                    "explanation": "Removed exact duplicate rows using the deterministic fallback.",
+                    "output_columns": list(schema),
+                }
+            if "copy unchanged" in request or "no transformation" in request or "leave unchanged" in request:
+                return {
+                    "plan": {"operations": []},
+                    "explanation": "Copied source data unchanged as explicitly requested.",
+                    "output_columns": list(schema),
+                }
+            raise ValidationError(
+                "The LLM planner is unavailable and this request cannot be safely interpreted. "
+                "Provide a declarative transformation_plan or configure an LLM provider."
+            ) from exc
 
     def _schema_for_prompt(self, df: pd.DataFrame) -> dict[str, Any]:
         """Return compact schema and samples for prompting."""
