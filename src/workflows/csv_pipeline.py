@@ -403,11 +403,14 @@ async def _publish_candidate(
     expected_hash = checkpoint.get("output_sha256")
     if expected_hash and hashlib.sha256(output_bytes).hexdigest() != expected_hash:
         raise ValueError("Staged artifact checksum mismatch; publication blocked")
+    # Promote the verified staging artifact to a stable published key.
+    published_path = f"silver/{pipeline.project_id}/{pipeline.id}.csv"
+    await get_storage().write(published_path, output_bytes, "text/csv")
     name = f"{source.name}-run-{pipeline.id[:8]}"
     result = await session.execute(select(Dataset).where(Dataset.project_id == pipeline.project_id, Dataset.name == name))
     target = result.scalar_one_or_none()
     dataset_values = {
-        "silver_path": candidate_path,
+        "silver_path": published_path,
         "schema_json": checkpoint.get("output_schema"),
         "profile_json": {**(checkpoint.get("profile") or {}), "output_sha256": checkpoint.get("output_sha256")},
         "row_count": checkpoint.get("output_row_count"),
