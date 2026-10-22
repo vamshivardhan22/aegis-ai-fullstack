@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.agents.base import BaseAgent
 from src.agents.safe_transform import apply_transformation_plan
 from src.config import get_settings
-from src.core.exceptions import ValidationError
+from src.core.exceptions import AgentError, ValidationError
 from src.core.logging import configure_logging
 from src.database.models import Dataset, Lineage
 from src.database.repository import DatasetRepository, LineageRepository
@@ -88,10 +88,10 @@ class TransformAgent(BaseAgent):
             }
         except ValidationError as exc:
             logger.warning("transform_validation_failed", error=exc.message)
-            return {"transform_failed": True, "error": exc.message}
+            raise
         except Exception as exc:
             logger.error("transform_agent_failed", error=str(exc))
-            return {"transform_failed": True, "error": "Unable to execute requested transformation."}
+            raise AgentError("Unable to execute requested transformation.") from exc
 
     async def _generate_transformation(self, context: dict[str, Any], schema: dict[str, Any]) -> dict[str, Any]:
         """Ask the LLM for a JSON plan; use a safe no-op fallback if unavailable."""
