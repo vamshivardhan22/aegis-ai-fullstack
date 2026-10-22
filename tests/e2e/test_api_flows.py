@@ -143,6 +143,10 @@ async def test_approval_resumes_pipeline_to_completion(client: AsyncClient) -> N
         assert output is not None
         assert output.silver_path == f"silver/{project_id}/{pipeline_id}.csv"
         assert output.row_count == 2
+        published_csv = await get_storage().read(output.silver_path)
+        assert b"one@example.com" not in published_csv
+        assert b"two@example.com" not in published_csv
+        assert b"token:" in published_csv
         actions_result = await session.execute(select(AuditLog.action).where(AuditLog.resource_id == pipeline_id))
         actions = set(actions_result.scalars().all())
         assert {"HUMAN_APPROVAL_GRANTED", "PIPELINE_PUBLISHED"}.issubset(actions)
