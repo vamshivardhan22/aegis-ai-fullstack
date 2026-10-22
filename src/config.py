@@ -74,6 +74,23 @@ class Settings(BaseSettings):
             problems.append("AEGIS_DB_URL must use PostgreSQL in production")
         if self.AEGIS_STORAGE_BACKEND == "local":
             problems.append("AEGIS_STORAGE_BACKEND must use durable shared storage in production")
+        if self.AEGIS_STORAGE_BACKEND == "supabase" and not (
+            self.AEGIS_SUPABASE_URL and self.AEGIS_SUPABASE_SERVICE_ROLE_KEY
+        ):
+            problems.append("Supabase URL and service-role key are required for production storage")
+        if self.AEGIS_STORAGE_BACKEND == "minio" and (
+            self.AEGIS_MINIO_ACCESS_KEY == "minioadmin" or self.AEGIS_MINIO_SECRET_KEY == "minioadmin"
+        ):
+            problems.append("Default MinIO credentials are forbidden in production")
+        provider_key = {
+            "openai": self.AEGIS_OPENAI_API_KEY,
+            "anthropic": self.AEGIS_ANTHROPIC_API_KEY,
+            "google": self.AEGIS_GOOGLE_API_KEY,
+        }.get(self.AEGIS_LLM_PROVIDER)
+        if not provider_key:
+            problems.append(f"API key is required for configured LLM provider: {self.AEGIS_LLM_PROVIDER}")
+        if self.AEGIS_EMBEDDING_PROVIDER == "openai" and not self.AEGIS_OPENAI_API_KEY:
+            problems.append("AEGIS_OPENAI_API_KEY is required for the configured embedding provider")
         if self.AEGIS_CORS_ORIGIN_REGEX:
             problems.append("AEGIS_CORS_ORIGIN_REGEX must be unset in production")
         if any("localhost" in origin or "127.0.0.1" in origin for origin in self.cors_origins):
