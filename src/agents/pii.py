@@ -83,8 +83,8 @@ class PIIDetectionAgent(BaseAgent):
                     )
             report = {
                 "dataset_id": context["dataset_id"],
-                "rows_scanned": int(len(df)),
-                "columns_scanned": int(len(df.columns)),
+                "rows_scanned": len(df),
+                "columns_scanned": len(df.columns),
                 "scan_coverage": "full_dataset",
                 "columns": report_columns,
             }
@@ -98,7 +98,7 @@ class PIIDetectionAgent(BaseAgent):
                     column = item["name"]
                     strategy = item["masking_strategy"]
                     masked[column] = masked[column].map(
-                        lambda value: value if pd.isna(value) else self._mask_value(str(value), strategy)
+                        lambda value, strategy=strategy: value if pd.isna(value) else self._mask_value(str(value), strategy)
                     )
                 if source_dataset is None or not isinstance(self.db_repo, AsyncSession):
                     raise ValidationError("Database-backed dataset metadata is required to publish a masked dataset")
@@ -112,8 +112,8 @@ class PIIDetectionAgent(BaseAgent):
                     "pii_columns": pii_columns,
                     "source_sha256": hashlib.sha256(raw_data).hexdigest(),
                     "output_sha256": hashlib.sha256(masked_bytes).hexdigest(),
-                    "row_count": int(len(masked)),
-                    "column_count": int(len(masked.columns)),
+                    "row_count": len(masked),
+                    "column_count": len(masked.columns),
                 }
                 masked_dataset = await DatasetRepository(self.db_repo).create(Dataset(
                     project_id=source_dataset.project_id,
