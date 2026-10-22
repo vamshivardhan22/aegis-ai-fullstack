@@ -48,7 +48,7 @@ class TransformAgent(BaseAgent):
             if isinstance(self.db_repo, AsyncSession):
                 datasets = DatasetRepository(self.db_repo)
                 lineage = LineageRepository(self.db_repo)
-                project_id = getattr(source, "project_id", context.get("project_id"))
+                if source is None:\n                    raise ValidationError("Source dataset was not found")\n                project_id = getattr(source, "project_id", context.get("project_id"))
                 if not project_id:
                     raise ValidationError("Source dataset or project_id is required to create transformed dataset")
                 target = await datasets.create(Dataset(
@@ -81,7 +81,7 @@ class TransformAgent(BaseAgent):
             }
         except ValidationError as exc:
             logger.warning("transform_validation_failed", error=exc.message)
-            return {"transform_failed": True, "error": exc.message}
+            raise
         except Exception as exc:
             logger.error("transform_agent_failed", error=str(exc))
             return {"transform_failed": True, "error": "Unable to execute requested transformation."}
