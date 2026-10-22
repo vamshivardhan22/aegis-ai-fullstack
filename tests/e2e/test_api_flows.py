@@ -40,6 +40,32 @@ async def test_complete_pipeline_flow(client: AsyncClient) -> None:
         json={"dataset_id": dataset_id, "artifact": dataset.json()["bronze_path"]},
     )
     assert ingestion.status_code == 200
+    assert ingestion.json()["status"] == "completed"
+    assert ingestion.json()["report_path"].endswith("/ingestion.json")
+    schema = await client.post("/agents/schema/execute", headers=headers, json={"dataset_id": dataset_id})
+    assert schema.status_code == 200
+    assert schema.json()["schema"]["amount"]["dtype"] in {"int64", "float64"}
+    quality = await client.post("/agents/quality/execute", headers=headers, json={"dataset_id": dataset_id})
+    assert quality.status_code == 200
+    assert quality.json()["quality"]["quality_score"] == 1.0
+    cleaning = await client.post(
+        "/agents/cleaning/execute",
+        headers=headers,
+        json={"dataset_id": dataset_id, "cleaning_options": {"trim_strings": True, "drop_duplicates": True}},
+    )
+    assert cleaning.status_code == 200
+    assert cleaning.json()["rows_before"] == 2
+    assert cleaning.json()["rows_after"] == 2
+    features = await client.post(
+        "/agents/features/execute",
+        headers=headers,
+        json={"dataset_id": dataset_id, "transformation_plan": {"operations": [
+            {"op": "cast", "columns": {"amount": "float"}},
+            {"op": "select_columns", "columns": ["id", "amount"]},
+        ]}},
+    )
+    assert features.status_code == 200
+    assert features.json()["columns"] == ["id", "amount"]
     ml = await client.post("/agents/ml/execute", headers=headers, json={"dataset_id": dataset_id})
     assert ml.status_code == 200
     pii = await client.post(
