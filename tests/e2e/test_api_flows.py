@@ -109,7 +109,7 @@ async def test_approval_resumes_pipeline_to_completion(client: AsyncClient) -> N
         assert pipeline.checkpoint_data["human_decisions"]["latest"]["decision"] == "approved"
         output = await session.get(Dataset, pipeline.checkpoint_data["output_dataset_id"])
         assert output is not None
-        assert output.silver_path == pipeline.checkpoint_data["candidate_artifact"]
+        assert output.silver_path == f"silver/{project_id}/{pipeline_id}.csv"
         assert output.row_count == 2
         actions_result = await session.execute(select(AuditLog.action).where(AuditLog.resource_id == pipeline_id))
         actions = set(actions_result.scalars().all())
