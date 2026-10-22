@@ -124,7 +124,7 @@ class CompatibilityAgent(BaseAgent):
                     sql_code="Validated deterministic transformation",
                     config_json={"sha256": digest},
                 ))
-            result.update({"output_path": key, "output_dataset_id": target.id, "rows": len(frame), "sha256": digest})
+            result.update({"output_path": key, "output_dataset_id": target.id, "rows": len(frame), "columns": list(frame.columns), "sha256": digest})
         else:
             key = f"reports/{dataset.project_id}/{dataset.id}/{self.name}.json"
             await self.store_artifact(key, json.dumps(result, indent=2).encode(), "application/json")
