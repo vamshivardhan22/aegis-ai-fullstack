@@ -38,23 +38,23 @@ The project is intentionally not autonomy without limits. It is autonomy with ex
 
 | Area | Current implementation |
 | --- | --- |
-| API control plane | FastAPI app with auth, agents, approvals, chat, admin, datasets, lineage, and health routers. |
+| API control plane | FastAPI app with auth, agents, approvals, chat, admin, datasets, pipelines, lineage, and health routers. |
 | Authentication | Email/password registration, bcrypt password hashing, JWT login, token refresh, and `/auth/me`. |
-| Authorization | Role checks for Admin, Data Engineer, Analyst, and Viewer users. Privileged routes use FastAPI dependencies. |
+| Authorization | Role checks plus project ownership checks for dataset, pipeline, approval, and lineage operations. Admin access is explicit; unauthorized resource IDs return 404. |
 | Agent execution | Admin and Data Engineer users can execute registered agents through `/agents/{agent_type}/execute`. |
-| Human approval | Pipelines in `approval_required` state can be listed, approved, rejected, and audited. Approval resumes checkpoint state. |
-| PII detection | CSV sample scanning with column heuristics, regexes, optional spaCy, optional LLM fallback, masked examples, and alert creation. |
+| Human approval | Sensitive CSV outputs are staged, persisted as approval checkpoints, and published only after an authorized decision. Rejections do not publish. |
+| PII detection | The CSV workflow checks column-name hints and value patterns, masks detected fields before staging, and pauses for approval. The separate PII agent produces a full-file scan report and can write a masked artifact when explicitly requested. |
 | Transform lineage | Transform agent writes a derived CSV artifact, creates a dataset record, and records dataset-to-dataset lineage. |
-| RAG chat | Chat answers direct database questions when possible and falls back to a RAG knowledge agent backed by Qdrant or an in-memory fallback. |
+| RAG chat | Direct database answers are project-scoped; retrieval exposes only public documents or documents scoped to the requested project. In-memory vector fallback is development-only; production fails closed when Qdrant or embeddings are unavailable. |
 | Audit logging | Registration, login, dataset operations, agent decisions, approval decisions, admin actions, and retention events use audit records. |
-| Frontend | React command center with dashboard, pipelines, agents, chat, approvals, lineage, monitoring, upload, login, signup, and admin pages. |
+| Frontend | React command center. Pipeline list, retry, upload, and approval actions call real API endpoints; pipeline state refreshes from persisted backend records. Other dashboard/agent/monitoring surfaces still need individual verification. |
 | Deployment assets | Dockerfile, Docker Compose stack, and Kubernetes manifests are included and validated by CI/static checks. |
 
-Some agent stages are deliberately lightweight compatibility stages. Ingestion, schema, quality, cleaning, features, and ML currently provide stable smoke-flow behavior through `CompatibilityAgent`; the deeper domain implementations are `TransformAgent`, `PIIDetectionAgent`, `ExplainAgent`, `DeployAgent`, `MonitorAgent`, `DriftAgent`, and `RAGKnowledgeAgent`.
+The governed `/pipelines/` CSV workflow performs real ingestion, schema checks, profiling, quality gating, PII masking, declarative transformations, approval checkpoints, publication, and lineage. **Do not confuse this workflow with every standalone agent endpoint:** the standalone ingestion, schema, quality, cleaning, features, and ML endpoints still use `CompatibilityAgent` smoke-stage behavior and are not full implementations. The deeper domain agents include `TransformAgent`, `PIIDetectionAgent`, `ExplainAgent`, `DeployAgent`, `MonitorAgent`, `DriftAgent`, and `RAGKnowledgeAgent`.
 
 ## Governance Flow
 
-The approval model is the strongest part of the project. A request does not go directly from user intent to execution. It passes through identity, role checks, policy-aware orchestration, and audit surfaces.
+The governed CSV path now uses a LangGraph state machine with pipeline-row checkpoints persisted after profiling and staging. Sensitive output is not published until approval. This is an initial vertical slice, not proof that every legacy agent, deployment target, retry path, or concurrency scenario is production-ready.
 
 ```mermaid
 flowchart TD
