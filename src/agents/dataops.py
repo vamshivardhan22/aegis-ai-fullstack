@@ -107,7 +107,7 @@ class DatasetOperationAgent(BaseAgent):
         """Write an immutable derived artifact and create its dataset/lineage records."""
         output_bytes = frame.to_csv(index=False).encode("utf-8")
         profile = _profile(frame, source_bytes)
-        profile["output_sha256"] = hashlib.sha256(output_bytes).hexdigest()
+        profile["output_sha256"] = hashlib.sha256(output_bytes).hexdigest()\n        source_profile = source.profile_json or {}\n        profile["masking_applied"] = bool(source_profile.get("masking_applied"))\n        profile["pii_columns"] = source_profile.get("pii_columns", {})
         artifact_id = uuid4().hex
         layer = "silver" if operation == "cleaning" else "gold"
         path = f"{layer}/{source.project_id}/{artifact_id}.csv"
