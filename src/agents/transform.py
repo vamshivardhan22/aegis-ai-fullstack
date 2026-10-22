@@ -8,7 +8,8 @@ import pandas as pd
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.agents.base import BaseAgent
-from src.agents.safe_transform import apply_transformation_plan\nfrom src.workflows.csv_pipeline import _detect_pii
+from src.agents.safe_transform import apply_transformation_plan
+from src.workflows.csv_pipeline import _detect_pii
 from src.config import get_settings
 from src.core.exceptions import ValidationError
 from src.core.logging import configure_logging
