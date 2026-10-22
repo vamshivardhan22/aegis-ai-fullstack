@@ -91,3 +91,10 @@ Lineage endpoints require authentication. `/lineage/datasets/{dataset_id}` retur
 Production clients should use idempotent names or external request identifiers when repeatedly creating datasets from automation. Dataset upload responses include stable IDs that should be stored by the caller and reused for downstream agent, lineage, and chat requests. Agent execution responses are intentionally plain JSON, so workflow systems can inspect result keys without parsing logs. Long-running production agents can later be moved behind queues while keeping the same request and response contracts.
 
 For browser or CLI applications, the recommended flow is: register or provision a user, log in, cache the bearer token until expiry, refresh before long workflows, upload data, execute the relevant agent, then query lineage or chat for human-readable interpretation. Administrative clients should page audit logs and export them to the organization’s security information and event management system. Monitoring clients should prefer `/health` for availability and Prometheus scraping for time-series behavior.
+
+
+## Model Registry
+
+- `GET /models/`: list trained model metadata and evaluation metrics for projects the caller can access.
+- `GET /models/{model_id}`: fetch one model record after project authorization.
+- `GET /models/{model_id}/download`: download the registered joblib artifact with an SHA-256 response header. The API does not deserialize downloaded artifacts.
