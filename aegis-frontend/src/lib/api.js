@@ -41,6 +41,14 @@ export async function downloadDataset(datasetId, layer = "silver") {
   return response.data;
 }
 
+export async function downloadModel(modelId) {
+  const response = await api.get(`/models/${encodeURIComponent(modelId)}/download`, {
+    responseType: "blob",
+    timeout: 60000
+  });
+  return response.data;
+}
+
 export async function registerAccount({ email, password, full_name, role }) {
   const { data } = await api.post("/auth/register", { email, password, full_name, role });
   return data;
