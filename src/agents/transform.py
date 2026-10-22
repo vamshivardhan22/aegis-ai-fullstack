@@ -8,7 +8,7 @@ import pandas as pd
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.agents.base import BaseAgent
-from src.agents.safe_transform import apply_transformation_plan
+from src.agents.safe_transform import apply_transformation_plan\nfrom src.workflows.csv_pipeline import _detect_pii
 from src.config import get_settings
 from src.core.exceptions import ValidationError
 from src.core.logging import configure_logging
@@ -25,6 +25,17 @@ class TransformAgent(BaseAgent):
         """Transform a source CSV into a silver dataset."""
         try:
             df = pd.read_csv(io.BytesIO(await self.storage.read(context["source_data_path"])))
+            source = None
+            if isinstance(self.db_repo, AsyncSession):
+                source = await DatasetRepository(self.db_repo).get_by_id(context["source_dataset_id"])
+                if source is None:
+                    raise ValidationError("Source dataset was not found")
+                pii_columns = _detect_pii(df)
+                if pii_columns and not (source.profile_json or {}).get("masking_applied"):
+                    raise ValidationError(
+                        "Sensitive columns must pass through the governed masking and approval workflow before standalone transformation",
+                        {"columns": list(pii_columns)},
+                    )
             schema = self._schema_for_prompt(df)
             generated = await self._generate_transformation(context, schema)
             plan = generated["plan"]
@@ -36,9 +47,6 @@ class TransformAgent(BaseAgent):
             if isinstance(self.db_repo, AsyncSession):
                 datasets = DatasetRepository(self.db_repo)
                 lineage = LineageRepository(self.db_repo)
-                source = await datasets.get_by_id(context["source_dataset_id"])
-                if source is None:
-                    raise ValidationError("Source dataset was not found")
                 project_id = getattr(source, "project_id", context.get("project_id"))
                 if not project_id:
                     raise ValidationError("Source dataset or project_id is required to create transformed dataset")
