@@ -391,10 +391,12 @@ async def test_pii_detection() -> None:
             "purchase_amount": [10.5, 20.0],
         }
     )
+    _, _, dataset = await seed_project_dataset("dataset-pii")
+    await DatasetRepository(AsyncSessionLocal()).update(dataset.id, {"bronze_path": "sample.csv"})
     await storage.write("sample.csv", csv.to_csv(index=False).encode())
     async with AsyncSessionLocal() as session:
         result = await PIIDetectionAgent("pii", MockLLM(), session, storage).execute(
-            {"dataset_id": "dataset-pii", "data_sample_path": "sample.csv"}
+            {"dataset_id": dataset.id, "data_sample_path": "sample.csv"}
         )
         alerts = (await session.execute(select(Alert))).scalars().all()
     report = json.loads((await storage.read(result["report_path"])).decode())
