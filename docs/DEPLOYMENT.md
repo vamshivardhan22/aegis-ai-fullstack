@@ -1,6 +1,6 @@
 # Deployment
 
-Aegis AI can run locally with Python, as a full Docker Compose stack, or as a Kubernetes deployment. Local Python is best for quick development and verification. Docker Compose is best for realistic integration because it includes PostgreSQL, Redis, MinIO, MLflow, Ollama, Prometheus, Grafana, Qdrant, Traefik, and the API. Kubernetes is best for production because it gives rolling deployment, probes, resource limits, horizontal autoscaling, secret management, ingress, and persistent volumes.
+Aegis AI can run locally with Python, as a full Docker Compose stack, or as a Kubernetes deployment. Local Python is best for quick development and verification. Docker Compose is best for realistic integration because it includes PostgreSQL, Redis, MinIO, MLflow, Prometheus, Grafana, Qdrant, Traefik, and the API. LLM calls use the configured LangChain provider; no local Ollama service is required. Kubernetes is best for production because it gives rolling deployment, probes, resource limits, horizontal autoscaling, secret management, ingress, and persistent volumes.
 
 ## Local Development
 
@@ -13,7 +13,7 @@ pip install -r requirements.txt
 python scripts/verify_m5.py
 ```
 
-SQLite and local storage are used by default. This mode is intentionally self-contained. It exercises API routers, authentication, agent behavior, lineage, RAG fallback, PII detection, retention policies, and test assets without requiring external services.
+SQLite and local storage are used by default for development. The deterministic CSV pipeline can run without an LLM key; LLM chat and embeddings require configured provider credentials. Development mode may use synthetic embeddings for tests, but production mode fails closed if Qdrant or the configured embedding provider is unavailable.
 
 ## Docker Compose
 
@@ -24,7 +24,7 @@ cp .env.example .env
 docker compose up --build
 ```
 
-The API listens on port 8000. Traefik listens on ports 80 and 443. PostgreSQL is on 5432, Redis on 6379, MinIO on 9000/9001, MLflow on 5000, Ollama on 11434, Prometheus on 9090, Grafana on 3000, and Qdrant on 6333. The API container runs Alembic migrations at startup and then starts Uvicorn.
+The API listens on port 8000. Traefik listens on ports 80 and 443. PostgreSQL is on 5432, Redis on 6379, MinIO on 9000/9001, MLflow on 5000, Prometheus on 9090, Grafana on 3000, and Qdrant on 6333. The API container runs Alembic migrations at startup and then starts Uvicorn.
 
 Useful checks:
 
@@ -43,7 +43,7 @@ kubectl apply -k k8s/
 kubectl -n aegis-ai get pods
 ```
 
-Before production use, replace the secret template:
+Before production use, replace every `REPLACE_WITH_*` placeholder, set a unique JWT secret of at least 32 characters, use a real PostgreSQL URL and durable storage credentials, set a real provider key, and replace the example CORS domain. The API intentionally refuses to start with known development defaults. Never commit real secrets. Replace the secret template:
 
 ```bash
 kubectl create secret generic aegis-secrets \
@@ -67,3 +67,8 @@ Back up PostgreSQL with `pg_dump` or a managed database snapshot. Back up MinIO 
 If `/health` is degraded, inspect the `checks` object to identify database or storage failure. If chat answers are sparse, verify Ollama and Qdrant availability; the app falls back gracefully, but production quality improves when embeddings and vector search are online. If authentication fails after deployment, confirm `AEGIS_SECRET_KEY` is identical across API replicas. If migrations fail, run `alembic current` and `alembic upgrade head` inside the API image.
 
 For performance issues, start with database connection pool pressure, storage latency, and LLM timeout behavior. Agent endpoints can be CPU or I/O heavy, so use the Kubernetes HPA and separate worker deployments when throughput grows. For security incidents, rotate `AEGIS_SECRET_KEY`, deactivate affected users through `/admin/users/{id}`, review `/admin/audit-logs`, and preserve database and object storage snapshots before remediation. For disaster recovery drills, restore into a staging namespace first, run `/health`, run `scripts/verify_m5.py`, and only then promote traffic.
+
+
+## LLM provider and cost notes
+
+`AEGIS_LLM_PROVIDER` selects OpenAI, Anthropic, or Google through LangChain integrations. Set the matching API key in `.env` or a secret manager. Embeddings currently use the configured OpenAI embedding model at 768 dimensions for the Qdrant collection. API provider pricing and free-tier quotas can change; zero license cost does not guarantee zero inference or embedding charges. If the requirement is zero recurring spend, disable hosted LLM features or choose a provider/account with a confirmed free quota and monitor usage.
