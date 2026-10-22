@@ -243,3 +243,41 @@ async def test_rejected_pii_pipeline_never_publishes_output(client: AsyncClient)
         assert pipeline.status == PipelineStatus.FAILED
         assert pipeline.checkpoint_data["stage"] == "rejected"
         assert "output_dataset_id" not in pipeline.checkpoint_data
+
+
+@pytest.mark.asyncio
+async def test_cleaning_and_feature_agents_create_lineage_linked_datasets(client: AsyncClient) -> None:
+    """Cleaning and feature agents must produce real derived artifacts, not smoke success."""
+    token = await _token(client, role="data_engineer")
+    headers = {"Authorization": f"Bearer {token}"}
+    created = await client.post(
+        "/datasets/",
+        headers=headers,
+        json={
+            "name": "feature_source",
+            "content": "category,unit_price,quantity\n A ,10,2\n A ,10,2\nB,5,3\n",
+            "source_type": "csv",
+        },
+    )
+    assert created.status_code == 200, created.text
+    dataset_id = created.json()["id"]
+
+    cleaned = await client.post("/agents/cleaning/execute", headers=headers, json={"dataset_id": dataset_id})
+    assert cleaned.status_code == 200, cleaned.text
+    assert cleaned.json()["row_count"] == 2
+    assert cleaned.json()["lineage_recorded"] is True
+
+    features = await client.post(
+        "/agents/features/execute",
+        headers=headers,
+        json={
+            "dataset_id": dataset_id,
+            "transformation_plan": {"operations": [
+                {"op": "derive_numeric", "name": "revenue", "left": "unit_price", "operator": "multiply", "right_column": "quantity"},
+                {"op": "derive_string", "name": "category_clean", "column": "category", "operation": "strip"},
+            ]},
+        },
+    )
+    assert features.status_code == 200, features.text
+    assert features.json()["output_path"].startswith("gold/")
+    assert features.json()["lineage_recorded"] is True
