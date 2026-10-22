@@ -9,7 +9,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.agents.rag import ingest_human_decision
 from src.core.security import require_role
-from src.database.models import Pipeline, PipelineStatus
+from src.core.tenancy import require_project_access
+from src.database.models import Pipeline, PipelineStatus, Project
 from src.database.models import User, UserRole
 from src.database.repository import AuditLogRepository, PipelineRepository
 from src.database.session import get_async_session
@@ -35,8 +36,7 @@ async def pending_approvals(
 ) -> dict[str, list[dict[str, Any]]]:
     """List pipelines waiting for human approval."""
 
-    del current_user
-    result = await session.execute(select(Pipeline).where(Pipeline.status == PipelineStatus.APPROVAL_REQUIRED))
+    query = select(Pipeline).join(Project, Project.id == Pipeline.project_id).where(Pipeline.status == PipelineStatus.APPROVAL_REQUIRED)\n    if current_user.role != UserRole.ADMIN:\n        query = query.where(Project.owner_id == current_user.id)\n    result = await session.execute(query)
     pipelines = result.scalars().all()
     return {
         "pipelines": [
@@ -60,11 +60,10 @@ async def approval_detail(
 ) -> dict[str, Any]:
     """Return context for a paused pipeline."""
 
-    del current_user
     pipeline = await PipelineRepository(session).get_by_id(pipeline_id)
     if pipeline is None:
         raise HTTPException(status_code=404, detail={"error": "Pipeline not found"})
-    checkpoint = pipeline.checkpoint_data or {}
+    await require_project_access(session, current_user, pipeline.project_id)\n    checkpoint = pipeline.checkpoint_data or {}
     return {
         "pipeline_id": pipeline.id,
         "status": pipeline.status.value,
@@ -102,11 +101,11 @@ async def approve_pipeline(
         resource_id=pipeline_id,
         user_id=current_user.id,
         before_json=before,
-        after_json={"status": PipelineStatus.RUNNING.value, "decision": decision.model_dump()},
+        after_json={"status": PipelineStatus.RUNNING.value, "decision": decision_data},
         rationale=decision.rationale,
         confidence=1.0,
     )
-    await ingest_human_decision(session, pipeline_id, decision.model_dump())
+    await ingest_human_decision(session, pipeline_id, decision_data)
     await resume_and_run(pipeline_id)
     return {"status": "resumed", "pipeline_id": pipeline_id}
 
@@ -124,11 +123,16 @@ async def reject_pipeline(
     pipeline = await pipeline_repo.get_by_id(pipeline_id)
     if pipeline is None:
         raise HTTPException(status_code=404, detail={"error": "Pipeline not found"})
+    await require_project_access(session, current_user, pipeline.project_id)
+    if pipeline.status != PipelineStatus.APPROVAL_REQUIRED:
+        raise HTTPException(status_code=409, detail="Pipeline is not waiting for approval")
+    decision_data = decision.model_dump(exclude={"user_id"})
+    decision_data["user_id"] = current_user.id
     before = {"status": pipeline.status.value, "checkpoint_data": pipeline.checkpoint_data}
     new_status = PipelineStatus.RUNNING if decision.alternative_action else PipelineStatus.FAILED
     checkpoint = dict(pipeline.checkpoint_data or {})
     checkpoint.setdefault("human_decisions", {})
-    checkpoint["human_decisions"]["latest"] = decision.model_dump()
+    checkpoint["human_decisions"]["latest"] = decision_data
     checkpoint["alternative_action"] = decision.alternative_action
     await pipeline_repo.update(
         pipeline_id,
@@ -140,9 +144,9 @@ async def reject_pipeline(
         resource_id=pipeline_id,
         user_id=current_user.id,
         before_json=before,
-        after_json={"status": new_status.value, "decision": decision.model_dump()},
+        after_json={"status": new_status.value, "decision": decision_data},
         rationale=decision.rationale,
         confidence=1.0,
     )
-    await ingest_human_decision(session, pipeline_id, decision.model_dump())
+    await ingest_human_decision(session, pipeline_id, decision_data)
     return {"status": new_status.value, "pipeline_id": pipeline_id}
