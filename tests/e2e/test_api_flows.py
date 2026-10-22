@@ -171,3 +171,33 @@ async def test_non_sensitive_csv_pipeline_publishes_output(client: AsyncClient) 
     lineage = await client.get(f"/lineage/datasets/{dataset_id}", headers=headers)
     assert lineage.status_code == 200
     assert any(edge["target"] == output_id for edge in lineage.json()["edges"])
+
+
+@pytest.mark.asyncio
+async def test_ml_agent_trains_and_registers_a_model(client: AsyncClient) -> None:
+    """The standalone ML agent must train and register a real evaluated model."""
+    token = await _token(client, role="data_engineer")
+    headers = {"Authorization": f"Bearer {token}"}
+    rows = ["id,age,spend,segment"]
+    for index in range(30):
+        segment = "high" if index % 2 else "low"
+        rows.append(f"{index},{20 + index},{100 + index * 7},{segment}")
+    csv_content = "\n".join(rows) + "\n"
+    created = await client.post(
+        "/datasets/",
+        headers=headers,
+        json={"name": "ml_training_data", "content": csv_content, "source_type": "csv"},
+    )
+    assert created.status_code == 200, created.text
+
+    trained = await client.post(
+        "/agents/ml/execute",
+        headers=headers,
+        json={"dataset_id": created.json()["id"], "target_column": "segment", "task": "classification"},
+    )
+    assert trained.status_code == 200, trained.text
+    result = trained.json()
+    assert result["model_id"]
+    assert result["algorithm"] == "RandomForestClassifier"
+    assert 0 <= result["metrics"]["accuracy"] <= 1
+    assert result["artifact_path"].endswith(".joblib")
