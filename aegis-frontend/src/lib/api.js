@@ -32,6 +32,15 @@ export async function listDatasets(projectId) {
   return data.datasets || [];
 }
 
+export async function downloadDataset(datasetId, layer = "silver") {
+  const response = await api.get(`/datasets/${encodeURIComponent(datasetId)}/download`, {
+    params: { layer },
+    responseType: "blob",
+    timeout: 60000
+  });
+  return response.data;
+}
+
 export async function registerAccount({ email, password, full_name, role }) {
   const { data } = await api.post("/auth/register", { email, password, full_name, role });
   return data;
