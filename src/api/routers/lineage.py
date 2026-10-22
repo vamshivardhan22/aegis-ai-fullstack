@@ -8,6 +8,7 @@ from sqlalchemy import bindparam, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.security import get_current_user, require_role
+from src.core.tenancy import require_dataset_access, require_project_access
 from src.database.models import Lineage, User, UserRole
 from src.database.repository import LineageRepository, PipelineRepository
 from src.database.session import get_async_session
@@ -33,12 +34,13 @@ async def dataset_lineage(
 ) -> dict[str, Any]:
     """Return upstream and downstream lineage for a dataset using recursive CTEs."""
 
-    del current_user
+    root_dataset = await require_dataset_access(session, current_user, dataset_id)
+    project_id = root_dataset.project_id
     upstream_sql = text(
         """
         WITH RECURSIVE upstream(source_dataset_id, target_dataset_id, transformation_type, agent_id, depth) AS (
             SELECT source_dataset_id, target_dataset_id, transformation_type, agent_id, 1
-            FROM lineage WHERE target_dataset_id = :dataset_id
+            FROM lineage l JOIN datasets source_ds ON source_ds.id = l.source_dataset_id JOIN datasets target_ds ON target_ds.id = l.target_dataset_id\n            WHERE l.target_dataset_id = :dataset_id AND source_ds.project_id = :project_id AND target_ds.project_id = :project_id
             UNION ALL
             SELECT l.source_dataset_id, l.target_dataset_id, l.transformation_type, l.agent_id, u.depth + 1
             FROM lineage l JOIN upstream u ON l.target_dataset_id = u.source_dataset_id
@@ -51,7 +53,7 @@ async def dataset_lineage(
         """
         WITH RECURSIVE downstream(source_dataset_id, target_dataset_id, transformation_type, agent_id, depth) AS (
             SELECT source_dataset_id, target_dataset_id, transformation_type, agent_id, 1
-            FROM lineage WHERE source_dataset_id = :dataset_id
+            FROM lineage l JOIN datasets source_ds ON source_ds.id = l.source_dataset_id JOIN datasets target_ds ON target_ds.id = l.target_dataset_id\n            WHERE l.source_dataset_id = :dataset_id AND source_ds.project_id = :project_id AND target_ds.project_id = :project_id
             UNION ALL
             SELECT l.source_dataset_id, l.target_dataset_id, l.transformation_type, l.agent_id, d.depth + 1
             FROM lineage l JOIN downstream d ON l.source_dataset_id = d.target_dataset_id
@@ -60,8 +62,8 @@ async def dataset_lineage(
         SELECT * FROM downstream
         """
     )
-    upstream_rows = (await session.execute(upstream_sql, {"dataset_id": dataset_id})).mappings().all()
-    downstream_rows = (await session.execute(downstream_sql, {"dataset_id": dataset_id})).mappings().all()
+    upstream_rows = (await session.execute(upstream_sql, {"dataset_id": dataset_id, "project_id": project_id})).mappings().all()
+    downstream_rows = (await session.execute(downstream_sql, {"dataset_id": dataset_id, "project_id": project_id})).mappings().all()
     dataset_ids = {dataset_id}
     edges = []
     for row in [*upstream_rows, *downstream_rows]:
@@ -102,11 +104,10 @@ async def pipeline_lineage(
 ) -> dict[str, Any]:
     """Return lineage for the dataset associated with a pipeline."""
 
-    del current_user
     pipeline = await PipelineRepository(session).get_by_id(pipeline_id)
     if pipeline is None:
         raise HTTPException(status_code=404, detail={"detail": "Pipeline not found", "code": "NOT_FOUND"})
-    return await dataset_lineage(pipeline.dataset_id, session, current_user=None)  # type: ignore[arg-type]
+    await require_project_access(session, current_user, pipeline.project_id)\n    return await dataset_lineage(pipeline.dataset_id, session, current_user)
 
 
 @router.get("/impact/{dataset_id}")
@@ -117,11 +118,10 @@ async def lineage_impact(
 ) -> dict[str, Any]:
     """Return downstream datasets, models, and deployments affected by a dataset change."""
 
-    del current_user
-    sql = text(
+    root_dataset = await require_dataset_access(session, current_user, dataset_id)\n    project_id = root_dataset.project_id\n    sql = text(
         """
         WITH RECURSIVE downstream(source_dataset_id, target_dataset_id, depth) AS (
-            SELECT source_dataset_id, target_dataset_id, 1 FROM lineage WHERE source_dataset_id = :dataset_id
+            SELECT l.source_dataset_id, l.target_dataset_id, 1 FROM lineage l JOIN datasets s ON s.id = l.source_dataset_id JOIN datasets t ON t.id = l.target_dataset_id WHERE l.source_dataset_id = :dataset_id AND s.project_id = :project_id AND t.project_id = :project_id
             UNION ALL
             SELECT l.source_dataset_id, l.target_dataset_id, d.depth + 1
             FROM lineage l JOIN downstream d ON l.source_dataset_id = d.target_dataset_id
@@ -130,27 +130,21 @@ async def lineage_impact(
         SELECT target_dataset_id, depth FROM downstream
         """
     )
-    rows = (await session.execute(sql, {"dataset_id": dataset_id})).mappings().all()
+    rows = (await session.execute(sql, {"dataset_id": dataset_id, "project_id": project_id})).mappings().all()
     affected_dataset_ids = [row["target_dataset_id"] for row in rows]
     if not affected_dataset_ids:
         return {"affected_datasets": [], "affected_models": [], "affected_deployments": []}
     models_sql = text("SELECT id, name, dataset_id FROM models WHERE dataset_id IN :ids").bindparams(
         bindparam("ids", expanding=True)
     )
-    try:
-        model_rows = (await session.execute(models_sql, {"ids": affected_dataset_ids})).mappings().all()
-    except Exception:
-        model_rows = []
+    model_rows = (await session.execute(models_sql, {"ids": affected_dataset_ids})).mappings().all()
     model_ids = [row["id"] for row in model_rows]
     deployment_rows = []
     if model_ids:
         deployments_sql = text("SELECT id, model_id, endpoint_url, status FROM deployments WHERE model_id IN :ids").bindparams(
             bindparam("ids", expanding=True)
         )
-        try:
-            deployment_rows = (await session.execute(deployments_sql, {"ids": model_ids})).mappings().all()
-        except Exception:
-            deployment_rows = []
+        deployment_rows = (await session.execute(deployments_sql, {"ids": model_ids})).mappings().all()
     return {
         "affected_datasets": [{"id": row["target_dataset_id"], "depth": row["depth"]} for row in rows],
         "affected_models": [dict(row) for row in model_rows],
@@ -166,7 +160,7 @@ async def record_lineage(
 ) -> dict[str, Any]:
     """Create a lineage edge."""
 
-    lineage = await LineageRepository(session).create(
+    source = await require_dataset_access(session, current_user, payload.source_dataset_id)\n    target = await require_dataset_access(session, current_user, payload.target_dataset_id)\n    if source.project_id != target.project_id:\n        raise HTTPException(status_code=422, detail="Lineage edges must stay within one project")\n    lineage = await LineageRepository(session).create(
         Lineage(
             source_dataset_id=payload.source_dataset_id,
             target_dataset_id=payload.target_dataset_id,
