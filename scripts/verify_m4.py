@@ -251,30 +251,33 @@ async def test_rag_agent() -> None:
 
 
 async def test_approval_api() -> None:
-    """Verify approval endpoint with auth."""
-
+    """Verify a sensitive CSV run is paused and published only after approval."""
     await reset_database()
-    admin, token = await seed_user("approval-admin@example.com", UserRole.ADMIN)
-    _, project, dataset = await seed_project_dataset("approval_m4")
-    async with AsyncSessionLocal() as session:
-        pipeline = await PipelineRepository(session).create(
-            Pipeline(
-                project_id=project.id,
-                dataset_id=dataset.id,
-                name="approval",
-                status=PipelineStatus.APPROVAL_REQUIRED,
-                current_state="human_approval",
-                checkpoint_data={"pipeline_id": "", "current_step": "human_approval", "completed_steps": []},
-            )
-        )
-        await PipelineRepository(session).update(pipeline.id, {"checkpoint_data": {"pipeline_id": pipeline.id, "current_step": "human_approval"}})
+    _, token = await seed_user("approval-admin@example.com", UserRole.ADMIN)
+    _, _, dataset = await seed_project_dataset("approval_m4")
+    await get_storage().write(
+        dataset.bronze_path,
+        b"order_id,customer_email,amount\n1,one@example.com,10\n2,two@example.com,20\n",
+        "text/csv",
+    )
     headers = {"Authorization": f"Bearer {token}"}
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://testserver") as client:
-        pending = await client.get("/approvals/pending", headers=headers)
-        approved = await client.post(f"/approvals/{pipeline.id}/approve", headers=headers, json={"decision": "approve", "rationale": "ok"})
-    assert pending.status_code == 200
-    assert approved.status_code == 200
+        pending_before = await client.get("/approvals/pending", headers=headers)
+        started = await client.post("/pipelines/", headers=headers, json={"dataset_id": dataset.id})
+        assert started.status_code == 200, started.text
+        pipeline_id = started.json()["pipeline"]["id"]
+        assert started.json()["pipeline"]["status"] == PipelineStatus.APPROVAL_REQUIRED.value
+        pending_after = await client.get("/approvals/pending", headers=headers)
+        approved = await client.post(
+            f"/approvals/{pipeline_id}/approve",
+            headers=headers,
+            json={"decision": "approve", "rationale": "Approved after masking."},
+        )
+    assert pending_before.status_code == 200
+    assert pending_after.status_code == 200
+    assert approved.status_code == 200, approved.text
+    assert approved.json()["status"] == PipelineStatus.COMPLETED.value
 
 
 async def test_chat_api() -> None:
