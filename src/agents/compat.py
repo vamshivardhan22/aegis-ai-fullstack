@@ -39,6 +39,15 @@ class CompatibilityAgent(BaseAgent):
             raise ValidationError("Source is not a valid CSV") from exc
         if frame.empty or frame.columns.duplicated().any() or not 1 <= len(frame.columns) <= 500:
             raise ValidationError("CSV needs data rows and unique column names; maximum 500 columns")
+        if self.name in {"cleaning", "features", "ml"}:
+            from src.workflows.csv_pipeline import _detect_pii
+
+            sensitive_columns = _detect_pii(frame)
+            if sensitive_columns:
+                raise ValidationError(
+                    "Sensitive columns require the governed pipeline approval and masking workflow",
+                    {"columns": sorted(sensitive_columns)},
+                )
         result: dict[str, Any]
         if self.name == "ingestion":
             report = {"rows": len(frame), "columns": list(frame.columns), "bytes": len(raw), "sha256": hashlib.sha256(raw).hexdigest()}
