@@ -37,7 +37,7 @@ class TransformAgent(BaseAgent):
             generated = await self._generate_transformation(context, schema)
             plan = generated["plan"]
             result = apply_transformation_plan(df, plan)
-            key = f"silver/{context.get('project_id', 'unassigned')}/{output_name}.csv"
+            key = f"silver/{context.get('project_id', context['source_dataset_id'])}/{output_name}.csv"
             await self.store_artifact(key, result.to_csv(index=False).encode(), "text/csv")
             dataset_id = ""
             lineage_id = ""
