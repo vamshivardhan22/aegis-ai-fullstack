@@ -119,7 +119,7 @@ async def create_pipeline(
             confidence=1.0,
         )
         refreshed = await session.execute(
-            select(Pipeline).options(selectinload(Pipeline.dataset)).where(Pipeline.id == pipeline.id)
+            select(Pipeline).options(selectinload(Pipeline.dataset)).where(Pipeline.id == pipeline.id).execution_options(populate_existing=True)
         )
         return {"pipeline": _serialize(refreshed.scalar_one()), "execution": {"status": "failed"}}
     refreshed = await session.execute(
