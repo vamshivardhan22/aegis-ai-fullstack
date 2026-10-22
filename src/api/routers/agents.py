@@ -12,7 +12,7 @@ from src.agents.explain import ExplainAgent
 from src.agents.monitor import MonitorAgent
 from src.agents.pii import PIIDetectionAgent
 from src.agents.transform import TransformAgent
-from src.core.exceptions import AegisError, AgentError, HumanApprovalRequired
+from src.core.exceptions import AegisError, HumanApprovalRequired
 from src.core.security import get_current_user, require_role
 from src.core.tenancy import require_dataset_access, require_dataset_path_access
 from src.database.models import User, UserRole
