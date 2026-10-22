@@ -92,6 +92,7 @@ async def execute_agent(
         for artifact_path in supplied_paths:
             await require_dataset_path_access(session, current_user, str(dataset_id), str(artifact_path))
         context["dataset_id"] = dataset.id
+        context["project_id"] = dataset.project_id
         if agent_type == "transform":
             context["source_dataset_id"] = dataset.id
             context.setdefault("source_data_path", dataset.bronze_path or dataset.silver_path or dataset.gold_path)
