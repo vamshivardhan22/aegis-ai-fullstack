@@ -395,6 +395,8 @@ async def _publish_candidate(
     if not candidate_path:
         raise ValueError("Pipeline checkpoint is missing the staged output artifact")
     output_bytes = await get_storage().read(candidate_path)
+    if not isinstance(output_bytes, bytes):
+        raise ValueError("Staged artifact is not binary data")
     expected_size = checkpoint.get("output_size_bytes")
     if expected_size is not None and len(output_bytes) != expected_size:
         raise ValueError("Staged artifact changed after validation; publication blocked")
