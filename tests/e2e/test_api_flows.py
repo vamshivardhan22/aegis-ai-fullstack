@@ -204,7 +204,7 @@ async def test_ml_agent_trains_and_registers_a_baseline(client: AsyncClient) -> 
     created = await client.post(
         "/datasets/",
         headers=headers,
-        json={"name": "baseline_training", "content": "\\n".join(rows), "source_type": "csv"},
+        json={"name": "baseline_training", "content": "\n".join(rows), "source_type": "csv"},
     )
     assert created.status_code == 200, created.text
     response = await client.post(
@@ -231,7 +231,7 @@ async def test_features_agent_persists_output_and_lineage_for_non_sensitive_data
     created = await client.post(
         "/datasets/",
         headers=headers,
-        json={"name": "feature_orders", "content": "order_id,amount\\n1,10\\n2,20\\n", "source_type": "csv"},
+        json={"name": "feature_orders", "content": "order_id,amount\n1,10\n2,20\n", "source_type": "csv"},
     )
     assert created.status_code == 200, created.text
     dataset_id = created.json()["id"]
