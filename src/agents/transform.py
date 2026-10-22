@@ -30,6 +30,14 @@ class TransformAgent(BaseAgent):
             df = pd.read_csv(io.BytesIO(source_bytes))
             if df.empty or len(df.columns) == 0 or len(df.columns) > 500 or df.columns.duplicated().any():
                 raise ValidationError("Source CSV must contain rows and unique columns, with at most 500 columns")
+            from src.workflows.csv_pipeline import _detect_pii
+
+            sensitive_columns = _detect_pii(df)
+            if sensitive_columns:
+                raise ValidationError(
+                    "Sensitive columns require the governed pipeline approval and masking workflow",
+                    {"columns": sorted(sensitive_columns)},
+                )
             output_name = str(context.get("output_name", "")).strip()
             if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,99}", output_name) or ".." in output_name:
                 raise ValidationError("output_name must be a safe identifier of at most 100 characters")
