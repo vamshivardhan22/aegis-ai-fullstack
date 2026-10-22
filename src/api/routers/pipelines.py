@@ -77,8 +77,8 @@ async def create_pipeline(
 ) -> dict[str, Any]:
     """Create and execute a governed CSV workflow; sensitive output pauses for approval."""
     dataset = await require_dataset_access(session, current_user, payload.dataset_id)
-    if not dataset.bronze_path:
-        raise HTTPException(status_code=422, detail="Dataset has no Bronze CSV artifact")
+    if not any((dataset.bronze_path, dataset.silver_path, dataset.gold_path)):
+        raise HTTPException(status_code=422, detail="Dataset has no stored CSV artifact")
     pipeline = await PipelineRepository(session).create(Pipeline(
         project_id=dataset.project_id,
         dataset_id=dataset.id,
