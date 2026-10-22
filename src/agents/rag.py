@@ -13,6 +13,7 @@ from src.config import get_settings
 from src.core.logging import configure_logging
 from src.database.models import Document, Pipeline
 from src.database.repository import DocumentRepository
+from src.llm.client import LLMClient
 
 logger = configure_logging(get_settings().AEGIS_DEBUG)
 
@@ -265,7 +266,7 @@ class RAGKnowledgeAgent(BaseAgent):
 async def ingest_pipeline_completion(session: AsyncSession, pipeline_id: str, payload: dict[str, Any]) -> None:
     """Auto-ingest completed pipeline context into the knowledge base."""
 
-    agent = RAGKnowledgeAgent("rag", _NoopLLM(), session, None)
+    agent = RAGKnowledgeAgent("rag", LLMClient(), session, None)
     pipeline = await session.get(Pipeline, pipeline_id)
     if pipeline is None:
         return
@@ -283,7 +284,7 @@ async def ingest_pipeline_completion(session: AsyncSession, pipeline_id: str, pa
 async def ingest_alert(session: AsyncSession, alert_payload: dict[str, Any]) -> None:
     """Auto-ingest alert details into the knowledge base."""
 
-    agent = RAGKnowledgeAgent("rag", _NoopLLM(), session, None)
+    agent = RAGKnowledgeAgent("rag", LLMClient(), session, None)
     await agent.execute(
         {
             "action": "ingest",
@@ -301,7 +302,7 @@ async def ingest_human_decision(session: AsyncSession, pipeline_id: str, decisio
     pipeline = await session.get(Pipeline, pipeline_id)
     if pipeline is None:
         return
-    agent = RAGKnowledgeAgent("rag", _NoopLLM(), session, None)
+    agent = RAGKnowledgeAgent("rag", LLMClient(), session, None)
     await agent.execute(
         {
             "action": "ingest",
@@ -312,12 +313,3 @@ async def ingest_human_decision(session: AsyncSession, pipeline_id: str, decisio
         }
     )
 
-
-class _NoopLLM:
-    """Internal LLM fallback for automatic background ingestion helpers."""
-
-    async def embed(self, text: str, model: str | None = None) -> list[float]:
-        return RAGKnowledgeAgent("rag", self, None, None)._deterministic_embedding(text)
-
-    async def generate(self, prompt: str, expect_json: bool = False, **kwargs: Any) -> str:
-        return prompt
