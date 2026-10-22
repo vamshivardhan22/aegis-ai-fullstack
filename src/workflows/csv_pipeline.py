@@ -1,9 +1,4 @@
-"""Durable, governed CSV pipeline vertical slice.
-
-The database pipeline record is the source of truth for stage state and approval
-checkpoints. LLM output is never executed; transformations use the allow-listed
-declarative engine.
-"""
+"""LangGraph-backed, database-checkpointed governed CSV workflow."""
 from __future__ import annotations
 
 import hashlib
@@ -11,10 +6,11 @@ import hmac
 import io
 import re
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, TypedDict
 
 import pandas as pd
 from fastapi import HTTPException
+from langgraph.graph import END, START, StateGraph
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -32,15 +28,43 @@ MAX_PIPELINE_BYTES = 50 * 1024 * 1024
 MAX_PIPELINE_COLUMNS = 500
 _PII_NAME_HINT = re.compile(
     r"(^|[_\s-])(email|e_mail|phone|mobile|ssn|social_security|address|full_name|first_name|last_name|"
-    r"customer_name|date_of_birth|dob|credit_card|card_number|account_number)([_\s-]|$)"
+    r"customer_name|name|date_of_birth|dob|credit_card|card_number|account_number|tax_id|passport|medical_record|ip_address)([_\s-]|$)"
 )
 _EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 _PHONE = re.compile(r"^\+?[0-9][0-9\s().-]{7,}[0-9]$")
 _CARD = re.compile(r"^(?:[0-9][ -]*?){13,19}$")
 
 
+class CSVWorkflowState(TypedDict, total=False):
+    """JSON-safe workflow state persisted on the pipeline record after each stage."""
+
+    pipeline_id: str
+    actor_id: str | None
+    dataset_id: str
+    project_id: str
+    source_path: str
+    source_sha256: str
+    input_schema: dict[str, str]
+    profile: dict[str, Any]
+    pii_columns: dict[str, str]
+    candidate_artifact: str
+    output_schema: dict[str, str]
+    output_row_count: int
+    output_column_count: int
+    output_size_bytes: int
+    output_sha256: str
+    quality_score: float
+    transformation_plan: dict[str, Any]
+    needs_approval: bool
+    stage: str
+    resume: bool
+    human_decisions: dict[str, Any]
+    result: dict[str, Any]
+    error_message: str
+
+
 def _detect_pii(frame: pd.DataFrame) -> dict[str, str]:
-    """Detect likely PII using explicit column-name hints and conservative full-column pattern ratios."""
+    """Detect likely PII using column-name hints and full-column pattern ratios."""
     detected: dict[str, str] = {}
     for column in frame.columns:
         normalized = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", str(column)).lower().replace(" ", "_")
@@ -52,12 +76,16 @@ def _detect_pii(frame: pd.DataFrame) -> dict[str, str]:
                 kind = "phone"
             elif "ssn" in token or "social_security" in normalized:
                 kind = "ssn"
-            elif "card" in token or "credit_card" in normalized or "account_number" in normalized:
+            elif "card" in token or "credit_card" in normalized or "account_number" in normalized or "tax_id" in normalized or "passport" in normalized:
                 kind = "financial_identifier"
             elif "address" in token:
                 kind = "address"
             elif "dob" in token or "date_of_birth" in normalized:
                 kind = "date_of_birth"
+            elif "medical_record" in normalized:
+                kind = "medical_record"
+            elif "ip_address" in normalized:
+                kind = "ip_address"
             else:
                 kind = "person_name"
             detected[str(column)] = kind
@@ -80,11 +108,10 @@ def _mask_value(value: Any, kind: str) -> Any:
         return value
     text = str(value)
     if kind in {"phone", "ssn", "financial_identifier"}:
-        digits = re.sub(r"\D", "", text)
-        if len(digits) >= 4:
+        if len(re.sub(r"\D", "", text)) >= 4:
             return "*" * max(0, len(text) - 4) + text[-4:]
         return "<redacted>"
-    if kind == "date_of_birth" or kind == "address":
+    if kind in {"date_of_birth", "address", "medical_record", "ip_address"}:
         return "<redacted>"
     digest = hmac.new(
         settings.AEGIS_SECRET_KEY.encode("utf-8"), text.encode("utf-8"), hashlib.sha256
@@ -93,6 +120,7 @@ def _mask_value(value: Any, kind: str) -> Any:
 
 
 def _profile(frame: pd.DataFrame, source_bytes: bytes) -> dict[str, Any]:
+    """Calculate deterministic row, null, duplicate, quality, and checksum metrics."""
     total_cells = max(1, int(frame.shape[0] * frame.shape[1]))
     null_count = int(frame.isna().sum().sum())
     duplicate_rows = int(frame.duplicated().sum())
@@ -128,22 +156,33 @@ async def _audit(
     )
 
 
-async def run_csv_pipeline(pipeline_id: str, actor_id: str | None = None) -> dict[str, Any]:
-    """Execute a CSV pipeline, persist its checkpoint, and pause before publishing sensitive data."""
+async def _persist_state(state: CSVWorkflowState, stage: str, status: PipelineStatus = PipelineStatus.RUNNING) -> None:
+    """Persist a JSON-safe checkpoint after a graph stage so a later request can resume."""
+    state["stage"] = stage
     async with AsyncSessionLocal() as session:
-        pipeline = await PipelineRepository(session).get_by_id(pipeline_id)
+        pipeline = await PipelineRepository(session).get_by_id(state["pipeline_id"])
         if pipeline is None:
-            raise HTTPException(status_code=404, detail="Pipeline not found")
-        if pipeline.status == PipelineStatus.COMPLETED:
-            return {"pipeline_id": pipeline.id, "status": pipeline.status.value, "checkpoint": pipeline.checkpoint_data or {}}
+            raise ValueError("Pipeline record disappeared during execution")
+        await PipelineRepository(session).update(
+            pipeline.id,
+            {
+                "status": status,
+                "current_state": stage,
+                "checkpoint_data": dict(state),
+                "error_message": state.get("error_message"),
+            },
+        )
+        await _audit(session, pipeline, state.get("actor_id"), "PIPELINE_CHECKPOINT_SAVED", {"stage": stage})
+
+
+async def _profile_node(state: CSVWorkflowState) -> CSVWorkflowState:
+    async with AsyncSessionLocal() as session:
+        pipeline = await PipelineRepository(session).get_by_id(state["pipeline_id"])
+        if pipeline is None:
+            raise ValueError("Pipeline not found")
         dataset = await DatasetRepository(session).get_by_id(pipeline.dataset_id)
         if dataset is None or dataset.project_id != pipeline.project_id or not dataset.bronze_path:
             raise ValueError("Pipeline source dataset or Bronze artifact is unavailable")
-        config = dict(pipeline.config or {})
-        await PipelineRepository(session).update(
-            pipeline.id, {"status": PipelineStatus.RUNNING, "current_state": "ingest", "error_message": None}
-        )
-        await _audit(session, pipeline, actor_id, "PIPELINE_STAGE_STARTED", {"stage": "ingest"})
         raw = await get_storage().read(dataset.bronze_path)
         if len(raw) > MAX_PIPELINE_BYTES:
             raise ValueError("Source CSV exceeds the 50 MiB pipeline execution limit")
@@ -159,6 +198,7 @@ async def run_csv_pipeline(pipeline_id: str, actor_id: str | None = None) -> dic
             raise ValueError("CSV must contain between 1 and 500 columns")
         if frame.columns.duplicated().any():
             raise ValueError("CSV contains duplicate column names")
+        config = dict(pipeline.config or {})
         required_columns = config.get("required_columns", [])
         if not isinstance(required_columns, list) or not all(isinstance(item, str) for item in required_columns):
             raise ValueError("required_columns must be a list of column names")
@@ -166,15 +206,6 @@ async def run_csv_pipeline(pipeline_id: str, actor_id: str | None = None) -> dic
         if missing:
             raise ValueError("Required columns are missing: " + ", ".join(missing))
         profile = _profile(frame, raw)
-        schema = {str(column): str(dtype) for column, dtype in frame.dtypes.items()}
-        await PipelineRepository(session).update(
-            pipeline.id,
-            {"current_state": "profile", "checkpoint_data": {
-                "stage": "profile", "source_dataset_id": dataset.id, "source_path": dataset.bronze_path,
-                "source_sha256": profile["source_sha256"], "input_schema": schema, "profile": profile,
-            }},
-        )
-        await _audit(session, pipeline, actor_id, "PIPELINE_STAGE_COMPLETED", {"stage": "profile", "profile": profile})
         minimum_quality = float(config.get("minimum_quality_score", 0.6))
         if not 0 <= minimum_quality <= 1:
             raise ValueError("minimum_quality_score must be between 0 and 1")
@@ -182,52 +213,157 @@ async def run_csv_pipeline(pipeline_id: str, actor_id: str | None = None) -> dic
             raise ValueError(
                 f"Quality gate failed: score {profile['quality_score']} is below configured minimum {minimum_quality}"
             )
-
-        await PipelineRepository(session).update(pipeline.id, {"current_state": "pii_policy"})
-        pii_columns = _detect_pii(frame)
-        masked = frame.copy(deep=True)
-        for column, kind in pii_columns.items():
-            masked[column] = masked[column].map(lambda value: _mask_value(value, kind))
-        plan = config.get("transformation_plan", {"operations": []})
-        if not isinstance(plan, dict):
-            raise ValueError("transformation_plan must be a declarative plan object")
-        transformed = apply_transformation_plan(masked, plan)
-        output_bytes = transformed.to_csv(index=False).encode("utf-8")
-        candidate_path = f"staging/{pipeline.project_id}/{pipeline.id}.csv"
-        await get_storage().write(candidate_path, output_bytes, "text/csv")
-        output_schema = {str(column): str(dtype) for column, dtype in transformed.dtypes.items()}
-        checkpoint = {
-            "stage": "awaiting_approval" if pii_columns or config.get("require_approval") else "publish",
-            "source_dataset_id": dataset.id,
+        state.update({
+            "dataset_id": dataset.id,
+            "project_id": pipeline.project_id,
             "source_path": dataset.bronze_path,
             "source_sha256": profile["source_sha256"],
-            "candidate_artifact": candidate_path,
-            "output_schema": output_schema,
-            "output_row_count": int(len(transformed)),
-            "output_column_count": int(len(transformed.columns)),
-            "output_size_bytes": len(output_bytes),
-            "output_sha256": hashlib.sha256(output_bytes).hexdigest(),
+            "input_schema": {str(column): str(dtype) for column, dtype in frame.dtypes.items()},
             "profile": profile,
             "quality_score": profile["quality_score"],
-            "pii_columns": pii_columns,
-            "masking_applied": bool(pii_columns),
-            "transformation_plan": plan,
-            "human_decisions": {},
+            "config": config,
+        })
+        await PipelineRepository(session).update(pipeline.id, {
+            "status": PipelineStatus.RUNNING,
+            "current_state": "profile",
+            "checkpoint_data": dict(state),
+            "error_message": None,
+        })
+        await _audit(session, pipeline, state.get("actor_id"), "PIPELINE_STAGE_COMPLETED", {"stage": "profile", "profile": profile})
+    return state
+
+
+async def _transform_node(state: CSVWorkflowState) -> CSVWorkflowState:
+    raw = await get_storage().read(state["source_path"])
+    frame = pd.read_csv(io.BytesIO(raw))
+    pii_columns = _detect_pii(frame)
+    masked = frame.copy(deep=True)
+    for column, kind in pii_columns.items():
+        masked[column] = masked[column].map(lambda value: _mask_value(value, kind))
+    config = state.get("config", {})
+    plan = config.get("transformation_plan", {"operations": []})
+    if not isinstance(plan, dict):
+        raise ValueError("transformation_plan must be a declarative plan object")
+    transformed = apply_transformation_plan(masked, plan)
+    output_bytes = transformed.to_csv(index=False).encode("utf-8")
+    candidate_path = f"staging/{state['project_id']}/{state['pipeline_id']}.csv"
+    await get_storage().write(candidate_path, output_bytes, "text/csv")
+    state.update({
+        "pii_columns": pii_columns,
+        "masking_applied": bool(pii_columns),
+        "candidate_artifact": candidate_path,
+        "output_schema": {str(column): str(dtype) for column, dtype in transformed.dtypes.items()},
+        "output_row_count": int(len(transformed)),
+        "output_column_count": int(len(transformed.columns)),
+        "output_size_bytes": len(output_bytes),
+        "output_sha256": hashlib.sha256(output_bytes).hexdigest(),
+        "transformation_plan": plan,
+        "needs_approval": bool(pii_columns or config.get("require_approval")),
+        "human_decisions": state.get("human_decisions", {}),
+    })
+    await _persist_state(state, "transform")
+    return state
+
+
+async def _approval_node(state: CSVWorkflowState) -> CSVWorkflowState:
+    async with AsyncSessionLocal() as session:
+        pipeline = await PipelineRepository(session).get_by_id(state["pipeline_id"])
+        if pipeline is None:
+            raise ValueError("Pipeline not found at approval gate")
+        await PipelineRepository(session).update(
+            pipeline.id,
+            {
+                "status": PipelineStatus.APPROVAL_REQUIRED,
+                "current_state": "human_approval",
+                "checkpoint_data": {**state, "stage": "awaiting_approval"},
+            },
+        )
+        await _audit(session, pipeline, state.get("actor_id"), "PIPELINE_APPROVAL_REQUIRED", {
+            "pii_columns": list(state.get("pii_columns", {})),
+            "candidate_artifact": state.get("candidate_artifact"),
+        })
+    state["stage"] = "awaiting_approval"
+    return state
+
+
+async def _publish_node(state: CSVWorkflowState) -> CSVWorkflowState:
+    async with AsyncSessionLocal() as session:
+        pipeline = await PipelineRepository(session).get_by_id(state["pipeline_id"])
+        if pipeline is None:
+            raise ValueError("Pipeline not found at publication gate")
+        source = await DatasetRepository(session).get_by_id(pipeline.dataset_id)
+        if source is None:
+            raise ValueError("Source dataset not found at publication gate")
+        result = await _publish_candidate(session, pipeline, source, dict(state), state.get("actor_id"))
+    state["stage"] = "published"
+    state["result"] = result
+    return state
+
+
+def _route_start(state: CSVWorkflowState) -> str:
+    return "publish" if state.get("resume") else "profile"
+
+
+def _route_after_transform(state: CSVWorkflowState) -> str:
+    return "approval" if state.get("needs_approval") else "publish"
+
+
+def _build_graph():
+    """Build the canonical LangGraph; durable state is checkpointed in the pipeline row."""
+    graph = StateGraph(CSVWorkflowState)
+    graph.add_node("route_start", lambda state: state)
+    graph.add_node("profile", _profile_node)
+    graph.add_node("transform", _transform_node)
+    graph.add_node("approval", _approval_node)
+    graph.add_node("publish", _publish_node)
+    graph.add_edge(START, "route_start")
+    graph.add_conditional_edges("route_start", _route_start, {"profile": "profile", "publish": "publish"})
+    graph.add_edge("profile", "transform")
+    graph.add_conditional_edges("transform", _route_after_transform, {"approval": "approval", "publish": "publish"})
+    graph.add_edge("approval", END)
+    graph.add_edge("publish", END)
+    return graph.compile()
+
+
+async def run_csv_pipeline(pipeline_id: str, actor_id: str | None = None) -> dict[str, Any]:
+    """Execute the LangGraph CSV workflow and persist stage checkpoints in PostgreSQL."""
+    async with AsyncSessionLocal() as session:
+        pipeline = await PipelineRepository(session).get_by_id(pipeline_id)
+        if pipeline is None:
+            raise HTTPException(status_code=404, detail="Pipeline not found")
+        if pipeline.status == PipelineStatus.COMPLETED:
+            return {"pipeline_id": pipeline.id, "status": pipeline.status.value, "checkpoint": pipeline.checkpoint_data or {}}
+        state: CSVWorkflowState = {"pipeline_id": pipeline.id, "actor_id": actor_id, "stage": "queued"}
+        await PipelineRepository(session).update(
+            pipeline.id,
+            {"status": PipelineStatus.RUNNING, "current_state": "queued", "error_message": None, "checkpoint_data": dict(state)},
+        )
+        await _audit(session, pipeline, actor_id, "PIPELINE_STAGE_STARTED", {"stage": "queued"})
+    try:
+        final_state = await _build_graph().ainvoke(state)
+    except Exception as exc:
+        async with AsyncSessionLocal() as session:
+            pipeline = await PipelineRepository(session).get_by_id(pipeline_id)
+            if pipeline is not None:
+                await PipelineRepository(session).update(pipeline_id, {
+                    "status": PipelineStatus.FAILED,
+                    "current_state": "failed",
+                    "error_message": str(exc)[:1000],
+                    "completed_at": datetime.now(UTC),
+                })
+                await _audit(session, pipeline, actor_id, "PIPELINE_FAILED", {"error": str(exc)[:500]})
+        raise
+    if final_state.get("stage") == "awaiting_approval":
+        return {
+            "pipeline_id": pipeline_id,
+            "status": PipelineStatus.APPROVAL_REQUIRED.value,
+            "checkpoint": {key: value for key, value in final_state.items() if key != "actor_id"},
         }
-        if pii_columns or config.get("require_approval"):
-            await PipelineRepository(session).update(
-                pipeline.id,
-                {"status": PipelineStatus.APPROVAL_REQUIRED, "current_state": "human_approval", "checkpoint_data": checkpoint},
-            )
-            await _audit(session, pipeline, actor_id, "PIPELINE_APPROVAL_REQUIRED", {
-                "pii_columns": list(pii_columns), "candidate_artifact": candidate_path,
-            })
-            return {"pipeline_id": pipeline.id, "status": PipelineStatus.APPROVAL_REQUIRED.value, "checkpoint": checkpoint}
-        return await _publish_candidate(session, pipeline, dataset, checkpoint, actor_id)
+    return final_state.get("result", {"pipeline_id": pipeline_id, "status": "unknown"})
 
 
 async def resume_csv_pipeline(pipeline_id: str, actor_id: str | None = None) -> dict[str, Any]:
-    """Resume publication from the persisted checkpoint after an authorized approval."""
+    """Resume from the persisted checkpoint after an authorized approval decision."""
     async with AsyncSessionLocal() as session:
         pipeline = await PipelineRepository(session).get_by_id(pipeline_id)
         if pipeline is None:
@@ -240,10 +376,11 @@ async def resume_csv_pipeline(pipeline_id: str, actor_id: str | None = None) -> 
         decision = (checkpoint.get("human_decisions") or {}).get("latest", {})
         if decision.get("decision") not in {"approve", "approved"}:
             raise HTTPException(status_code=409, detail="An approval decision is required before publication")
-        source = await DatasetRepository(session).get_by_id(pipeline.dataset_id)
-        if source is None:
-            raise HTTPException(status_code=404, detail="Source dataset not found")
-        return await _publish_candidate(session, pipeline, source, checkpoint, actor_id)
+        checkpoint["pipeline_id"] = pipeline.id
+        checkpoint["actor_id"] = actor_id
+        checkpoint["resume"] = True
+    final_state = await _build_graph().ainvoke(checkpoint)
+    return final_state.get("result", {"pipeline_id": pipeline_id, "status": "unknown"})
 
 
 async def _publish_candidate(
@@ -257,6 +394,9 @@ async def _publish_candidate(
     expected_size = checkpoint.get("output_size_bytes")
     if expected_size is not None and len(output_bytes) != expected_size:
         raise ValueError("Staged artifact changed after validation; publication blocked")
+    expected_hash = checkpoint.get("output_sha256")
+    if expected_hash and hashlib.sha256(output_bytes).hexdigest() != expected_hash:
+        raise ValueError("Staged artifact checksum mismatch; publication blocked")
     name = f"{source.name}-run-{pipeline.id[:8]}"
     result = await session.execute(select(Dataset).where(Dataset.project_id == pipeline.project_id, Dataset.name == name))
     target = result.scalar_one_or_none()
@@ -271,6 +411,7 @@ async def _publish_candidate(
             row_count=checkpoint.get("output_row_count"),
             column_count=checkpoint.get("output_column_count"),
             size_bytes=len(output_bytes),
+            quality_score=checkpoint.get("quality_score"),
             version=source.version + 1,
         ))
     edge_query = await session.execute(select(Lineage).where(
@@ -290,7 +431,12 @@ async def _publish_candidate(
                 "source_sha256": checkpoint.get("source_sha256"),
             },
         ))
-    final_checkpoint = {**checkpoint, "stage": "published", "output_dataset_id": target.id, "published_at": datetime.now(UTC).isoformat()}
+    final_checkpoint = {
+        **checkpoint,
+        "stage": "published",
+        "output_dataset_id": target.id,
+        "published_at": datetime.now(UTC).isoformat(),
+    }
     await PipelineRepository(session).update(pipeline.id, {
         "status": PipelineStatus.COMPLETED,
         "current_state": "published",
