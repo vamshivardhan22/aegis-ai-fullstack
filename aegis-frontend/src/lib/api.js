@@ -19,7 +19,7 @@ export async function resumePipeline(pipelineId) {
   return data;
 }
 
-export async function listDatasets(projectId) {
+export async function uploadDataset(file, name = file.name.replace(/\\.csv$/i, "")) {\n  const form = new FormData();\n  form.append("file", file);\n  form.append("name", name);\n  const { data } = await api.post("/datasets/upload", form, { timeout: 60000 });\n  return data;\n}\n\nexport async function listDatasets(projectId) {
   const { data } = await api.get("/datasets/", { params: projectId ? { project_id: projectId } : {} });
   return data.datasets || [];
 }
