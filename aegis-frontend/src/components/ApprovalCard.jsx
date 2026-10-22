@@ -6,7 +6,10 @@ const riskTone = { high: "bg-aegis-red/15 text-aegis-red border-aegis-red/35", m
 
 export default function ApprovalCard({ approval, onApprove, onReject }) {
   const [leaving, setLeaving] = useState(false);
-  const action = async (fn) => {\n    setLeaving(true);\n    try { await fn(approval.id); } finally { setLeaving(false); }\n  };
+  const action = async (fn) => {
+    setLeaving(true);
+    try { await fn(approval.id); } finally { setLeaving(false); }
+  };
   return (
     <div className={cn("panel p-5 transition", leaving && "animate-slideAway")}>
       <div className="flex flex-wrap items-start justify-between gap-3">
