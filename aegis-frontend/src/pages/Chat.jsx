@@ -18,7 +18,8 @@ export default function Chat() {
   };
   return (
     <div className="flex h-[calc(100vh-132px)] min-h-[620px] flex-col overflow-hidden rounded-card border border-aegis-border bg-aegis-bg/50">
-      {error ? <div role="alert" className="border-b border-aegis-red/30 bg-aegis-red/10 px-4 py-2 text-sm text-aegis-red">{error}</div> : null}\n      <div className="flex-1 space-y-4 overflow-y-auto p-4 md:p-6">
+      {error ? <div role="alert" className="border-b border-aegis-red/30 bg-aegis-red/10 px-4 py-2 text-sm text-aegis-red">{error}</div> : null}
+      <div className="flex-1 space-y-4 overflow-y-auto p-4 md:p-6">
         {messages.map((message) => <ChatMessage key={message.id} message={message} />)}
         {loading ? <div className="flex gap-1 px-4"><span className="h-2 w-2 animate-bounce rounded-full bg-aegis-blue" /><span className="h-2 w-2 animate-bounce rounded-full bg-aegis-blue [animation-delay:120ms]" /><span className="h-2 w-2 animate-bounce rounded-full bg-aegis-blue [animation-delay:240ms]" /></div> : null}
       </div>
