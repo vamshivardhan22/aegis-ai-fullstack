@@ -66,6 +66,12 @@ async def test_complete_pipeline_flow(client: AsyncClient) -> None:
     )
     assert features.status_code == 200
     assert features.json()["columns"] == ["id", "amount"]
+    assert features.json()["output_dataset_id"]
+    feature_dataset = await client.get(f"/datasets/{features.json()['output_dataset_id']}", headers=headers)
+    assert feature_dataset.status_code == 200
+    feature_lineage = await client.get(f"/lineage/datasets/{dataset_id}", headers=headers)
+    assert feature_lineage.status_code == 200
+    assert any(edge["target"] == features.json()["output_dataset_id"] for edge in feature_lineage.json()["edges"])
     ml = await client.post("/agents/ml/execute", headers=headers, json={"dataset_id": dataset_id})
     assert ml.status_code == 200
     pii = await client.post(
