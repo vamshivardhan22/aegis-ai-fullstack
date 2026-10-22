@@ -5,7 +5,8 @@ import { useToast } from "../components/Toast.jsx";
 import { createPipeline, listDatasets, uploadDataset } from "../lib/api.js";
 
 export default function Upload() {
-  const [file, setFile] = useState(null);\n  const [uploadKey, setUploadKey] = useState(0);
+  const [file, setFile] = useState(null);
+  const [uploadKey, setUploadKey] = useState(0);
   const [recent, setRecent] = useState([]);
   const [busy, setBusy] = useState(false);
   const [loadingRecent, setLoadingRecent] = useState(true);
