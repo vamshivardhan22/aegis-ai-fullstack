@@ -127,7 +127,7 @@ class TransformAgent(BaseAgent):
                 group_col = group_match.group(1) if group_match else "category"
                 sum_col = sum_match.group(1) if sum_match else "amount"
                 if group_col not in schema or sum_col not in schema:
-                    raise ValidationError("Fallback transformation refers to missing columns")
+                    raise ValidationError("Fallback transformation refers to missing columns") from exc
                 return {
                     "plan": {"operations": [{"op": "groupby_agg", "group_by": [group_col], "aggregations": {sum_col: "sum"}}]},
                     "explanation": f"Grouped rows by {group_col} and summed {sum_col}.",
