@@ -1,8 +1,8 @@
 import { Fragment, useEffect, useState } from "react";
-import { RotateCcw, Play, RefreshCw } from "lucide-react";
+import { RotateCcw, Play, RefreshCw, Download } from "lucide-react";
 import PipelineTimeline from "../components/PipelineTimeline.jsx";
 import { usePipelines } from "../hooks/usePipelines.js";
-import { listDatasets } from "../lib/api.js";
+import { downloadDataset, listDatasets } from "../lib/api.js";
 import { cn } from "../lib/utils.js";
 
 const tabs = ["All", "Running", "Completed", "Failed", "Pending Approval"];
@@ -49,6 +49,24 @@ export default function Pipelines() {
     if (filter === "Pending Approval") return pipeline.status === "approval_required";
     return pipeline.status.replace("_", " ").toLowerCase() === filter.toLowerCase();
   });
+
+  const downloadOutput = async (pipeline) => {
+    const datasetId = pipeline.checkpoint?.output_dataset_id;
+    if (!datasetId) return;
+    try {
+      const blob = await downloadDataset(datasetId, "silver");
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = `${pipeline.name.replace(/[^A-Za-z0-9._-]/g, "_")}-output.csv`;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setDatasetError(err.response?.data?.detail || err.message || "Unable to download the output artifact.");
+    }
+  };
 
   const startPipeline = async () => {
     if (!selectedDataset) return;
@@ -120,7 +138,7 @@ export default function Pipelines() {
                         ) : pipeline.status === "approval_required" ? <span className="text-xs text-aegis-orange">Approval needed</span> : <span className="text-xs text-aegis-muted">—</span>}
                       </td>
                     </tr>
-                    {open === pipeline.id ? <tr><td colSpan="7" className="border-t border-aegis-border bg-aegis-bg/35 px-8 py-5"><PipelineTimeline steps={timelineFor(pipeline)} /></td></tr> : null}
+                    {open === pipeline.id ? <tr><td colSpan="7" className="border-t border-aegis-border bg-aegis-bg/35 px-8 py-5"><PipelineTimeline steps={timelineFor(pipeline)} />{pipeline.status === "completed" && pipeline.checkpoint?.output_dataset_id ? <button type="button" onClick={(event) => { event.stopPropagation(); downloadOutput(pipeline); }} className="ghost-button mt-4 inline-flex items-center gap-2 px-3 py-2"><Download className="h-4 w-4" /> Download published CSV</button> : null}</td></tr> : null}
                   </Fragment>
                 ))}
                 {filtered.length === 0 && !loading ? <tr><td colSpan="7" className="px-5 py-12 text-center text-aegis-muted">{pipelines.length ? "No pipelines match this filter." : "No pipelines yet. Select a dataset above to start your first run."}</td></tr> : null}
