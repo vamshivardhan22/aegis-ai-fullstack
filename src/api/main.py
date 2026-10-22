@@ -54,6 +54,7 @@ app.include_router(admin.router, prefix="/admin", tags=["admin"])
 app.include_router(lineage.router, prefix="/lineage", tags=["lineage"])
 app.include_router(datasets.router, prefix="/datasets", tags=["datasets"])
 app.include_router(pipelines.router, prefix="/pipelines", tags=["pipelines"])
+app.include_router(models.router, prefix="/models", tags=["models"])
 
 
 @app.exception_handler(ValidationError)
