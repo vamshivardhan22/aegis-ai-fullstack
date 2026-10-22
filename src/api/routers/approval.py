@@ -95,8 +95,10 @@ async def approve_pipeline(
     decision_data["decision"] = "approved"
     decision_data["user_id"] = current_user.id
     checkpoint = dict(pipeline.checkpoint_data or {})
-    checkpoint.setdefault("human_decisions", {})
-    checkpoint["human_decisions"]["latest"] = decision_data
+    checkpoint["human_decisions"] = {
+        **(checkpoint.get("human_decisions") or {}),
+        "latest": decision_data,
+    }
     if decision.modifications:
         raise HTTPException(status_code=422, detail="Approval-time data modifications are not supported; create a new run")
     await repo.update(pipeline_id, {
