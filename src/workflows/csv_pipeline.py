@@ -8,6 +8,7 @@ import re
 from datetime import UTC, datetime
 from typing import Any, TypedDict
 
+import numpy as np
 import pandas as pd
 from fastapi import HTTPException
 from langgraph.graph import END, START, StateGraph
@@ -129,8 +130,14 @@ def _profile(frame: pd.DataFrame, source_bytes: bytes) -> dict[str, Any]:
     null_count = int(frame.isna().sum().sum())
     duplicate_rows = int(frame.duplicated().sum())
     duplicate_ratio = duplicate_rows / max(1, len(frame))
+    non_finite_counts = {
+        str(column): int(np.isinf(pd.to_numeric(frame[column], errors="coerce").astype(float)).sum())
+        for column in frame.select_dtypes(include=["number"]).columns
+    }
+    non_finite_cells = sum(non_finite_counts.values())
     null_ratio = null_count / total_cells
-    score = max(0.0, min(1.0, 1.0 - 0.7 * null_ratio - 0.3 * duplicate_ratio))
+    non_finite_ratio = non_finite_cells / total_cells
+    score = max(0.0, min(1.0, 1.0 - 0.7 * null_ratio - 0.3 * duplicate_ratio - 0.5 * non_finite_ratio))
     return {
         "profile_version": 1,
         "row_count": len(frame),
@@ -138,6 +145,8 @@ def _profile(frame: pd.DataFrame, source_bytes: bytes) -> dict[str, Any]:
         "null_counts": {str(column): int(count) for column, count in frame.isna().sum().items()},
         "null_cells": null_count,
         "duplicate_rows": duplicate_rows,
+        "non_finite_counts": non_finite_counts,
+        "non_finite_cells": non_finite_cells,
         "null_ratio": round(null_ratio, 6),
         "duplicate_ratio": round(duplicate_ratio, 6),
         "quality_score": round(score, 4),
@@ -267,6 +276,8 @@ async def _transform_node(state: CSVWorkflowState) -> CSVWorkflowState:
     output_profile["source_sha256"] = state["source_sha256"]
     output_profile["output_sha256"] = hashlib.sha256(output_bytes).hexdigest()
     minimum_quality = float(config.get("minimum_quality_score", 0.6))
+    if output_profile["non_finite_cells"]:
+        raise ValueError("Output contains non-finite numeric values; publication blocked")
     if output_profile["quality_score"] < minimum_quality:
         raise ValueError(
             f"Output quality gate failed: score {output_profile['quality_score']} is below configured minimum {minimum_quality}"
