@@ -298,14 +298,39 @@ async def test_chat_api() -> None:
 
 
 async def test_qdrant_service() -> None:
-    """Verify vector collection behavior."""
+    """Verify vector collection behavior and project-level retrieval isolation."""
 
     store = AsyncVectorStore(get_settings().AEGIS_QDRANT_COLLECTION)
     await store.ensure_collection()
     assert await store.collection_exists()
     vector = [0.2] * VECTOR_SIZE
-    await store.upsert("m4-qdrant", vector, {"document_id": "m4-qdrant"})
-    assert await store.search(vector, limit=1)
+    await store.upsert(
+        "m4-qdrant-public",
+        vector,
+        {"document_id": "m4-qdrant-public", "visibility": "public"},
+    )
+    await store.upsert(
+        "m4-qdrant-project-a",
+        vector,
+        {"document_id": "m4-qdrant-project-a", "project_id": "m4-project-a", "visibility": "private"},
+    )
+    await store.upsert(
+        "m4-qdrant-project-b",
+        vector,
+        {"document_id": "m4-qdrant-project-b", "project_id": "m4-project-b", "visibility": "private"},
+    )
+
+    public_hits = await store.search(vector, limit=10)
+    project_a_hits = await store.search(vector, limit=10, project_id="m4-project-a")
+    public_ids = {hit["id"] for hit in public_hits}
+    project_a_ids = {hit["id"] for hit in project_a_hits}
+
+    assert "m4-qdrant-public" in public_ids
+    assert "m4-qdrant-project-a" not in public_ids
+    assert "m4-qdrant-project-b" not in public_ids
+    assert "m4-qdrant-public" in project_a_ids
+    assert "m4-qdrant-project-a" in project_a_ids
+    assert "m4-qdrant-project-b" not in project_a_ids
 
 
 async def test_auth() -> None:
