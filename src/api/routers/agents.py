@@ -5,7 +5,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.agents.compat import CompatibilityAgent
+from src.agents.dataops import DatasetOperationAgent
 from src.agents.deploy import DeployAgent
 from src.agents.drift import DriftAgent
 from src.agents.explain import ExplainAgent
@@ -23,12 +23,12 @@ from src.storage import get_storage
 router = APIRouter()
 
 AGENT_TYPES = {
-    "ingestion": CompatibilityAgent,
-    "schema": CompatibilityAgent,
-    "quality": CompatibilityAgent,
-    "cleaning": CompatibilityAgent,
-    "features": CompatibilityAgent,
-    "ml": CompatibilityAgent,
+    "ingestion": DatasetOperationAgent,
+    "schema": DatasetOperationAgent,
+    "quality": DatasetOperationAgent,
+    "cleaning": DatasetOperationAgent,
+    "features": DatasetOperationAgent,
+    "ml": DatasetOperationAgent,
     "explain": ExplainAgent,
     "deploy": DeployAgent,
     "monitor": MonitorAgent,
@@ -79,7 +79,7 @@ async def execute_agent(
     dataset_id = context.get("dataset_id") or context.get("source_dataset_id")
     path_fields = ("data_sample_path", "source_data_path", "artifact")
     supplied_paths = [context[field] for field in path_fields if context.get(field)]
-    if agent_type in {"pii", "transform"} and not dataset_id:
+    if agent_type in {"ingestion", "schema", "quality", "cleaning", "features", "ml", "pii", "transform"} and not dataset_id:
         raise HTTPException(status_code=422, detail="This agent requires an authorized dataset_id")
     if supplied_paths and not dataset_id:
         raise HTTPException(status_code=404, detail="Dataset artifact not found")
