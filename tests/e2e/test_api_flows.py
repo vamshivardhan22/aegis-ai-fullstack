@@ -66,7 +66,8 @@ async def test_complete_pipeline_flow(client: AsyncClient) -> None:
     assert features.status_code == 422
     assert "governed pipeline" in features.json()["detail"]["message"]
     ml = await client.post("/agents/ml/execute", headers=headers, json={"dataset_id": dataset_id})
-    assert ml.status_code == 200
+    assert ml.status_code == 422
+    assert "governed pipeline" in ml.json()["detail"]["message"]
     pii = await client.post(
         "/agents/pii/execute",
         headers=headers,
