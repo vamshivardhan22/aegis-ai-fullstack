@@ -35,7 +35,6 @@ class Settings(BaseSettings):
     AEGIS_LLM_MODEL: str = "gpt-4o-mini"
     AEGIS_LLM_TEMPERATURE: float = 0.2
     AEGIS_LLM_TIMEOUT: int = 120
-    AEGIS_OLLAMA_URL: str = "http://localhost:11434"
     AEGIS_OPENAI_API_KEY: Optional[str] = None
     AEGIS_ANTHROPIC_API_KEY: Optional[str] = None
     AEGIS_GOOGLE_API_KEY: Optional[str] = None
@@ -66,7 +65,7 @@ class Settings(BaseSettings):
         if self.AEGIS_ENV != "production":
             return self
         problems: list[str] = []
-        if self.AEGIS_SECRET_KEY == "change-me-in-production" or len(self.AEGIS_SECRET_KEY) < 32:
+        if "change-me" in self.AEGIS_SECRET_KEY.lower() or "replace" in self.AEGIS_SECRET_KEY.lower() or len(self.AEGIS_SECRET_KEY) < 32:
             problems.append("AEGIS_SECRET_KEY must be a unique secret of at least 32 characters")
         if self.AEGIS_DEBUG:
             problems.append("AEGIS_DEBUG must be false in production")
@@ -87,9 +86,11 @@ class Settings(BaseSettings):
             "anthropic": self.AEGIS_ANTHROPIC_API_KEY,
             "google": self.AEGIS_GOOGLE_API_KEY,
         }.get(self.AEGIS_LLM_PROVIDER)
-        if not provider_key:
-            problems.append(f"API key is required for configured LLM provider: {self.AEGIS_LLM_PROVIDER}")
-        if self.AEGIS_EMBEDDING_PROVIDER == "openai" and not self.AEGIS_OPENAI_API_KEY:
+        if not provider_key or provider_key.lower().startswith(("replace", "your_", "changeme")):
+            problems.append(f"A real API key is required for configured LLM provider: {self.AEGIS_LLM_PROVIDER}")
+        if "aegis_secret" in self.AEGIS_DB_URL.lower():
+            problems.append("Default database password must be replaced in production")
+        if self.AEGIS_EMBEDDING_PROVIDER == "openai" and (not self.AEGIS_OPENAI_API_KEY or self.AEGIS_OPENAI_API_KEY.lower().startswith(("replace", "your_", "changeme"))):
             problems.append("AEGIS_OPENAI_API_KEY is required for the configured embedding provider")
         if self.AEGIS_CORS_ORIGIN_REGEX:
             problems.append("AEGIS_CORS_ORIGIN_REGEX must be unset in production")
