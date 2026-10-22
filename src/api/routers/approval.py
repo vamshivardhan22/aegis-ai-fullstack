@@ -83,7 +83,8 @@ async def approve_pipeline(
 ) -> dict[str, Any]:
     """Approve a pending checkpoint and publish its validated staged artifact."""
     repo = PipelineRepository(session)
-    pipeline = await repo.get_by_id(pipeline_id)
+    locked = await session.execute(select(Pipeline).where(Pipeline.id == pipeline_id).with_for_update())
+    pipeline = locked.scalar_one_or_none()
     if pipeline is None:
         raise HTTPException(status_code=404, detail="Pipeline not found")
     await require_project_access(session, current_user, pipeline.project_id)
