@@ -1,69 +1,93 @@
-import { ShieldCheck } from "lucide-react";
-import { useEffect, useState } from "react";
+import { ShieldCheck, RefreshCw } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
 import ApprovalCard from "../components/ApprovalCard.jsx";
 import { useToast } from "../components/Toast.jsx";
 import api from "../lib/api.js";
 
-const fallback = [
-  { id: "142", title: "Pipeline #142 - High Data Loss Risk", riskLevel: "high", description: "Quality agent detected a 17.8% null-rate increase in revenue_amount.", impact: "{\n  \"dataset\": \"transactions_q3\",\n  \"loss_risk\": \"17.8%\",\n  \"affected_models\": [\"fraud_score_v4\", \"ltv_v2\"],\n  \"recommendation\": \"pause deploy and run imputation branch\"\n}" },
-  { id: "138", title: "Pipeline #138 - Schema Drift", riskLevel: "medium", description: "New enum values appeared in customer_segment.", impact: "{\n  \"new_values\": [\"enterprise_plus\", \"trial_revive\"],\n  \"downstream\": \"feature_encoder\",\n  \"alternative\": \"map unknowns to review bucket\"\n}" }
-];
-
 function normalizeApproval(item) {
-  if (item.id) return item;
-  const checkpoint = item.checkpoint || item.current_state || {};
+  const piiColumns = item.pii_columns || {};
   return {
     id: item.pipeline_id,
-    title: `Pipeline ${item.pipeline_id} - Approval Required`,
-    riskLevel: checkpoint.risk_level || "medium",
-    description: item.error_message || "Pipeline is paused at a human governance gate.",
+    title: `Pipeline ${item.pipeline_id?.slice(0, 8) || ""} · Approval required`,
+    riskLevel: Object.keys(piiColumns).length ? "high" : "medium",
+    description: item.error_message || (
+      Object.keys(piiColumns).length
+        ? "Sensitive columns were masked. Review the staged output before publishing."
+        : "This pipeline paused at a configured governance gate."
+    ),
     impact: JSON.stringify({
       project_id: item.project_id,
       dataset_id: item.dataset_id,
       current_state: item.current_state,
-      checkpoint: item.checkpoint
+      quality_score: item.quality_score,
+      pii_columns: piiColumns,
+      candidate_artifact: item.candidate_artifact
     }, null, 2)
   };
 }
 
 function decisionPayload(decision, rationale) {
-  return {
-    decision,
-    rationale,
-    modifications: {},
-    alternative_action: null
-  };
+  return { decision, rationale };
 }
 
 export default function Approvals() {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [busyId, setBusyId] = useState(null);
   const toast = useToast();
-  useEffect(() => {
-    api.get("/approvals/pending").then(({ data }) => {
-      const approvals = Array.isArray(data) ? data : data.approvals || data.pipelines;
-      setItems((approvals || []).map(normalizeApproval));
-    }).catch(() => {
-      setItems(fallback.map((item) => ({ ...item, localOnly: true })));
-      toast.info("Using local demo approvals while the approval API is unavailable.");
-    }).finally(() => setLoading(false));
+
+  const refresh = useCallback(async () => {
+    setLoading(true);
+    try {
+      const { data } = await api.get("/approvals/pending");
+      setItems((data.pipelines || []).map(normalizeApproval));
+      setError("");
+    } catch (err) {
+      setError(err.response?.data?.detail || err.message || "Unable to load pending approvals.");
+    } finally {
+      setLoading(false);
+    }
   }, []);
-  const approve = async (id) => {
-    const item = items.find((approval) => approval.id === id);
-    if (!item?.localOnly) await api.post(`/approvals/${id}/approve`, decisionPayload("approve", "Approved from Aegis AI console."));
-    setItems((current) => current.filter((item) => item.id !== id));
-    window.dispatchEvent(new CustomEvent("aegis-approvals-updated"));
-    toast.success("Approval accepted.");
+
+  useEffect(() => { refresh(); }, [refresh]);
+
+  const decide = async (id, decision) => {
+    setBusyId(id);
+    try {
+      const endpoint = decision === "approve" ? "approve" : "reject";
+      await api.post(`/approvals/${encodeURIComponent(id)}/${endpoint}`, decisionPayload(
+        decision,
+        decision === "approve" ? "Approved from Aegis DataOps console." : "Rejected from Aegis DataOps console."
+      ));
+      toast.success(decision === "approve" ? "Output published successfully." : "Pipeline rejected; output was not published.");
+      window.dispatchEvent(new CustomEvent("aegis-approvals-updated"));
+      await refresh();
+    } catch (err) {
+      const message = err.response?.data?.detail || err.message || "Approval action failed.";
+      setError(typeof message === "string" ? message : JSON.stringify(message));
+      toast.error("Approval action failed.");
+    } finally {
+      setBusyId(null);
+    }
   };
-  const reject = async (id) => {
-    const item = items.find((approval) => approval.id === id);
-    if (!item?.localOnly) await api.post(`/approvals/${id}/reject`, decisionPayload("reject", "Rejected from Aegis AI console."));
-    setItems((current) => current.filter((item) => item.id !== id));
-    window.dispatchEvent(new CustomEvent("aegis-approvals-updated"));
-    toast.error("Approval rejected.");
-  };
-  const modify = () => toast.info("Modification request opened for review.");
-  if (loading) return <div className="h-64 skeleton" />;
-  if (!items.length) return <div className="panel flex min-h-[420px] flex-col items-center justify-center p-8 text-center"><ShieldCheck className="h-14 w-14 text-aegis-green" /><h2 className="mt-4 text-2xl font-bold text-white">No pending approvals</h2><p className="mt-2 text-aegis-muted">Risk gates are clear.</p></div>;
-  return <div className="grid gap-4 xl:grid-cols-2">{items.map((approval) => <ApprovalCard key={approval.id} approval={approval} onApprove={approve} onReject={reject} onModify={modify} />)}</div>;
+
+  if (loading && !items.length) return <div className="h-64 skeleton" />;
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between gap-3">
+        <div><h2 className="text-xl font-bold text-white">Human approvals</h2><p className="mt-1 text-sm text-aegis-muted">Only persisted pending approvals are shown.</p></div>
+        <button type="button" onClick={refresh} disabled={loading} className="ghost-button inline-flex items-center gap-2 px-3 py-2"><RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} /> Refresh</button>
+      </div>
+      {error ? <div role="alert" className="rounded-button border border-aegis-red/30 bg-aegis-red/10 p-3 text-sm text-aegis-red">{error}</div> : null}
+      {!items.length && !loading ? <div className="panel flex min-h-[320px] flex-col items-center justify-center p-8 text-center"><ShieldCheck className="h-14 w-14 text-aegis-green" /><h2 className="mt-4 text-2xl font-bold text-white">No pending approvals</h2><p className="mt-2 text-aegis-muted">There are no approval checkpoints for projects you can access.</p></div> : null}
+      <div className="grid gap-4 xl:grid-cols-2">
+        {items.map((approval) => (
+          <div key={approval.id} className={busyId === approval.id ? "pointer-events-none opacity-60" : ""}>
+            <ApprovalCard approval={approval} onApprove={(id) => decide(id, "approve")} onReject={(id) => decide(id, "reject")} />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
 }
